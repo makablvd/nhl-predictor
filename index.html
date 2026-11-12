@@ -134,9 +134,6 @@ return String(v||"").toUpperCase().replace(/[^A-Z]/g,"");
 function matchesTeam(value,code){
 return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
 }
-function matchesTeam(value,code){
-return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
-}
 function setStatus(v){$("status").textContent=v}
 
 async function fetchNHL(path){
