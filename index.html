@@ -758,6 +758,8 @@ const score=["FUT","PRE"].includes(g.gameState)
 
 return `<div class="game">
 <b>${a.abbrev||"?"} ${score} ${h.abbrev||"?"}</b>
+<div class="small">${g.gameDate||""} | ${g.gameState||""}</div>
+</div>`;
 }</div>
 `).join("");
 }catch(e){
