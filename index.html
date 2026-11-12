@@ -126,13 +126,14 @@ return String(v??"").replace(/[&<>"']/g,c=>({
 "'":"&#39;"
 })[c]);
 }
-return String(v??"").replace(/[&<>"']/g,c=>({
-"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;'
-,"'":"&#39;"
-})[c]);
+
+function norm(v){
+return String(v||"").toUpperCase().replace(/[^A-Z]/g,"");
 }
 
-function norm(v){return String(v||"").toUpperCase().replace(/[^A-Z]/g,"")}
+function matchesTeam(value,code){
+return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
+}
 function matchesTeam(value,code){
 return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
 }
