@@ -270,16 +270,33 @@ tiistai on yksi kokonainen lepopäivä.
 Erotus 2 päivää - 1 = 1 lepopäivä.
 */
 function fatigue(schedule,code,targetDate){
-const games=recentGames(schedule,code,targetDate);
-const last=games[0]?.date||null;
+const games=(schedule?.games||[])
+.map(g=>({date:getDate(g)}))
+.filter(g=>g.date&&g.date<targetDate)
+.sort((a,b)=>b.date.localeCompare(a.date));
 
+const last=games[0]?.date||null;
 const gap=last?diffDays(last,targetDate):null;
 const rest=gap===null?null:Math.max(0,gap-1);
 
-// Lasketaan vain ottelua edeltävät kalenteripäivät.
-const count=(days)=>games.filter(g=>{
+const count=days=>games.filter(g=>{
 const d=diffDays(g.date,targetDate);
 return d>=1&&d<=days;
+}).length;
+
+const last4=count(4);
+const last7=count(7);
+const last10=count(10);
+const backToBack=gap===1;
+
+let penalty=0;
+if(backToBack)penalty+=2.0;
+if(last4>=3)penalty+=1.5;
+if(last7>=4)penalty+=1.2;
+if(last10>=5)penalty+=0.8;
+if(rest!==null&&rest>=3)penalty-=0.5;
+
+return {rest,last4,last7,last10,backToBack,penalty,lastGame:last};
 }).length;
 
 const last4=count(4);
