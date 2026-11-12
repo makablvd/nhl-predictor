@@ -121,13 +121,18 @@ function name(code){
  return teams.find(t=>t[0]===code)?.[1]||code;
 }
 
+
 async function getData(url){
- const response=await fetch(url);
+ const proxy="https://api.allorigins.win/raw?url=";
+ const response=await fetch(proxy+encodeURIComponent(url));
+
  if(!response.ok){
-  throw new Error("NHL API vastasi HTTP "+response.status);
+  throw new Error("Tietopalvelimen virhe: "+response.status);
  }
+
  return await response.json();
 }
+
 
 async function loadStandings(){
  const data=await getData(API+"/standings/now");
