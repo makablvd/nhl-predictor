@@ -758,4 +758,38 @@ const score=["FUT","PRE"].includes(g.gameState)
 
 return `<div class="game">
 <b>${a.abbrev||"?"} ${score} ${h.abbrev||"?"}</b>
-<div class="small">${g.gameDate||""} | ${g.gameState||""}
+}</div>
+`).join("");
+}catch(e){
+$("games").innerHTML="<p class='error'>Otteluiden lataus epäonnistui: "+e.message+"</p>";
+}
+}
+
+function savePrediction(){
+if(!latestPrediction)return;
+try{
+const key="nhlPredictorSaved";
+const saved=JSON.parse(localStorage.getItem(key)||"[]");
+saved.unshift(latestPrediction);
+localStorage.setItem(key,JSON.stringify(saved.slice(0,100)));
+$("status").innerHTML="<span class='good'>Ennuste tallennettu tähän laitteeseen.</span>";
+}catch(e){
+$("status").innerHTML="<span class='error'>Ennustetta ei voitu tallentaa selaimeen.</span>";
+}
+}
+
+$("analyze").addEventListener("click",analyze);
+$("refresh").addEventListener("click",async()=>{
+$("status").textContent="Päivitetään NHL-tietoja...";
+await Promise.allSettled([loadGames(),loadStandings()]);
+});
+$("savePrediction").addEventListener("click",savePrediction);
+
+loadStandings().catch(e=>{
+$("standings").innerHTML="<p class='error'>Sarjataulukon lataus epäonnistui: "+e.message+"</p>";
+});
+loadGames();
+
+</script>
+</body>
+</html>
