@@ -145,7 +145,7 @@ async function loadStandings(){
 
 async function getLast10(code){
  const data=await getData(
- API+"/club-schedule/"+code+"/now"
+ API+"/club-schedule-season/"+code+"/now"
  );
 
  const games=(data.games||[])
