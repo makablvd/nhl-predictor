@@ -16,7 +16,7 @@ h3{font-size:15px;margin:18px 0 9px;color:#dbeafe}
 .panel{background:#132238;border:1px solid #293d57;border-radius:13px;padding:14px;margin:12px 0}
 .controls,.grid{display:grid;grid-template-columns:1fr;gap:10px}
 label{display:block;font-size:12px;color:#b6c6d9;margin-bottom:6px}
-select,button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}
+select,input[type="date"],button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}
 button{background:#087f5b;border:0;font-weight:bold;margin-top:12px}
 button:disabled{opacity:.5}
 .stat{background:#1b304b;border-radius:9px;padding:11px;min-width:0}
@@ -37,12 +37,12 @@ th{color:#9aabc0;font-weight:normal}
 .note{font-size:12px;line-height:1.5;color:#9aabc0}
 .section{border-top:1px solid #30445e;margin-top:15px;padding-top:12px}
 @media(max-width:480px){
- body{padding:8px}
- .panel{padding:11px}
- .controls,.grid{gap:7px}
- .value{font-size:18px}
- .prob{font-size:25px}
- td,th{padding:7px 3px}
+body{padding:8px}
+.panel{padding:11px}
+.controls,.grid{gap:7px}
+.value{font-size:18px}
+.prob{font-size:25px}
+td,th{padding:7px 3px}
 }
 </style>
 </head>
@@ -62,9 +62,13 @@ th{color:#9aabc0;font-weight:normal}
 <label for="teamB">Vierasjoukkue</label>
 <select id="teamB"></select>
 </div>
+<div>
+<label for="gameDate">Ottelupäivä</label>
+<input id="gameDate" type="date">
+</div>
 </div>
 <button id="analyzeBtn" onclick="analyze()">ANALYSOI OTTELU</button>
-<div id="status" class="status">Valitse joukkueet ja aloita analyysi.</div>
+<div id="status" class="status">Valitse joukkueet ja ottelupäivä.</div>
 </div>
 
 <div id="output"></div>
@@ -104,13 +108,22 @@ TBL:["TBL","TB","TAMPABAYLIGHTNING"]
 
 const $=id=>document.getElementById(id);
 const name=code=>teams.find(t=>t[0]===code)?.[1]||code;
-const today=()=>new Date().toISOString().slice(0,10);
+
+// Suomen paikallinen päivämäärä, ei UTC-päivämäärä.
+const today=()=>{
+const d=new Date();
+return d.getFullYear()+"-"+
+String(d.getMonth()+1).padStart(2,"0")+"-"+
+String(d.getDate()).padStart(2,"0");
+};
 
 function esc(v){
 return String(v??"").replace(/[&<>"']/g,c=>({
-"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;'
+,"'":"&#39;"
 })[c]);
 }
+
 function norm(v){return String(v||"").toUpperCase().replace(/[^A-Z]/g,"")}
 function matchesTeam(value,code){
 return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
@@ -164,74 +177,113 @@ return "other";
 }
 
 function getDate(g){return g.gameDate||g.date||""}
+
 function completed(g){
-return ["OFF","FINAL","OVER"].includes(String(g.gameState||g.gameScheduleState||"").toUpperCase());
+return ["OFF","FINAL","OVER"].includes(
+String(g.gameState||g.gameScheduleState||"").toUpperCase()
+);
 }
+
+// Päivämäärien erotus kokonaisina kalenteripäivinä.
 function diffDays(a,b){
-return Math.round((new Date(b+"T12:00:00")-new Date(a+"T12:00:00"))/86400000);
+const da=new Date(a+"T12:00:00");
+const db=new Date(b+"T12:00:00");
+return Math.round((db-da)/86400000);
 }
+
 function gameResult(g,code){
 const home=g.homeTeam?.abbrev===code;
 const own=home?g.homeTeam:g.awayTeam;
 const opp=home?g.awayTeam:g.homeTeam;
-if(!own||!opp||!Number.isFinite(own.score)||!Number.isFinite(opp.score))return null;
+if(!own||!opp)return null;
+
+const ownScore=Number(own.score);
+const oppScore=Number(opp.score);
+if(!Number.isFinite(ownScore)||!Number.isFinite(oppScore))return null;
+
 return {
 date:getDate(g),
 opponent:opp.abbrev||"?",
-gf:own.score,ga:opp.score,
-result:own.score>opp.score?"V":own.score<opp.score?"H":"JA",
+gf:ownScore,
+ga:oppScore,
+result:ownScore>oppScore?"V":ownScore<oppScore?"H":"JA",
 home
 };
 }
-function recentGames(schedule,code){
-return (schedule?.games||[]).filter(completed)
-.map(g=>gameResult(g,code)).filter(Boolean)
+
+// Mukaan otetaan vain valittua ottelupäivää edeltäneet pelit.
+function recentGames(schedule,code,targetDate=today()){
+return (schedule?.games||[])
+.filter(completed)
+.map(g=>gameResult(g,code))
+.filter(Boolean)
+.filter(g=>g.date<targetDate)
 .sort((a,b)=>b.date.localeCompare(a.date));
 }
+
 function summary(games){
 if(!games.length)return null;
 const wins=games.filter(g=>g.result==="V").length;
 const gf=games.reduce((s,g)=>s+g.gf,0);
 const ga=games.reduce((s,g)=>s+g.ga,0);
 return {
-played:games.length,wins,
+played:games.length,
+wins,
 losses:games.filter(g=>g.result==="H").length,
 winRate:wins/games.length,
-gf:gf/games.length,ga:ga/games.length,
+gf:gf/games.length,
+ga:ga/games.length,
 goalDiff:(gf-ga)/games.length
 };
 }
+
 function getStanding(data,code){
 return (data?.standings||[]).find(r=>
 r.teamAbbrev?.default===code||r.teamAbbrev===code
 )||null;
 }
 
-/* Rasitus: lasketaan pelatut ottelut ennen nykyistä päivää. */
-function fatigue(schedule,code){
-const games=recentGames(schedule,code);
-const t=today();
+/*
+Lepopäivät:
+Jos viimeisin peli oli maanantaina ja seuraava ottelu keskiviikkona,
+tiistai on yksi kokonainen lepopäivä.
+Erotus 2 päivää - 1 = 1 lepopäivä.
+*/
+function fatigue(schedule,code,targetDate){
+const games=recentGames(schedule,code,targetDate);
 const last=games[0]?.date||null;
-const rest=last?Math.max(0,diffDays(last,t)):null;
+
+const gap=last?diffDays(last,targetDate):null;
+const rest=gap===null?null:Math.max(0,gap-1);
+
+// Lasketaan vain ottelua edeltävät kalenteripäivät.
 const count=(days)=>games.filter(g=>{
-const d=diffDays(g.date,t);
-return d>=0&&d<days;
+const d=diffDays(g.date,targetDate);
+return d>=1&&d<=days;
 }).length;
-const last4=count(4),last7=count(7),last10=count(10);
-const backToBack=last4>=2&&rest!==null&&rest<=1;
+
+const last4=count(4);
+const last7=count(7);
+const last10=count(10);
+
+// Ottelu edellisenä kalenteripäivänä = 0 lepopäivää.
+const backToBack=gap===1;
+
 let penalty=0;
 if(backToBack)penalty+=2.0;
 if(last4>=3)penalty+=1.5;
 if(last7>=4)penalty+=1.2;
 if(last10>=5)penalty+=0.8;
 if(rest!==null&&rest>=3)penalty-=0.5;
-return {rest,last4,last7,last10,backToBack,penalty};
+
+return {rest,last4,last7,last10,backToBack,penalty,lastGame:last};
 }
 
 function standingRank(v){
 const n=Number(v);
 return Number.isFinite(n)&&n>0?n+".":"–";
 }
+
 function standingsHTML(s){
 if(!s)return `<p class="muted">Sarjataulukon tietoja ei saatu.</p>`;
 return `
@@ -248,13 +300,30 @@ function fatigueHTML(f){
 if(!f)return `<p class="muted">Rasitustietoja ei saatavilla.</p>`;
 return `
 <div class="grid">
-<div class="stat"><div class="small">Lepopäiviä</div><div class="value">${f.rest===null?"–":f.rest}</div></div>
-<div class="stat"><div class="small">Otteluita 4 päivässä</div><div class="value">${f.last4}</div></div>
-<div class="stat"><div class="small">Otteluita 7 päivässä</div><div class="value">${f.last7}</div></div>
-<div class="stat"><div class="small">Otteluita 10 päivässä</div><div class="value">${f.last10}</div></div>
+<div class="stat">
+<div class="small">Lepopäiviä ennen ottelua</div>
+<div class="value">${f.rest===null?"–":f.rest}</div>
 </div>
+<div class="stat">
+<div class="small">Otteluita edeltävänä 4 päivänä</div>
+<div class="value">${f.last4}</div>
+</div>
+<div class="stat">
+<div class="small">Otteluita edeltävänä 7 päivänä</div>
+<div class="value">${f.last7}</div>
+</div>
+<div class="stat">
+<div class="small">Otteluita edeltävänä 10 päivänä</div>
+<div class="value">${f.last10}</div>
+</div>
+</div>
+<p class="small">${f.lastGame?
+"Viimeisin ottelu: "+esc(f.lastGame):
+"Viimeisintä ottelua ei löytynyt."}</p>
 <p class="small ${f.backToBack?"warn":"muted"}">
-${f.backToBack?"⚠ Peräkkäiset pelipäivät – rasitus huomioitu.":"Ei havaittua peräkkäisten pelipäivien rasitusta."}
+${f.backToBack?
+"⚠ Peräkkäiset pelipäivät – rasitus huomioitu.":
+"Ei peräkkäisten pelipäivien rasitusta."}
 </p>`;
 }
 
@@ -272,17 +341,14 @@ return `<div class="injury">
 }).join("");
 }
 
-/* Poissaolojen alustava painotus voittaja-arviossa. */
 function injuryImpact(list,code,ok){
 if(!ok)return null;
 let impact=0;
 const rows=list.filter(i=>matchesTeam(i.team,code));
-
 for(const i of rows){
 const kind=injuryKind(i.status);
 const position=String(i.position||"").toUpperCase();
 const goalie=position==="G";
-
 if(kind==="out"){
 impact+=goalie?5:1.6;
 }else if(kind==="day"){
@@ -292,10 +358,10 @@ impact+=goalie?2.5:0.7;
 return Math.min(8,impact);
 }
 
-function teamPanel(code,schedule,standing,injuries,injuryOK){
-const games=recentGames(schedule,code);
+function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate){
+const games=recentGames(schedule,code,targetDate);
 const s=summary(games.slice(0,10));
-const f=fatigue(schedule,code);
+const f=fatigue(schedule,code,targetDate);
 const rows=games.slice(0,5).map(g=>`
 <tr>
 <td>${esc(g.date)}</td>
@@ -303,6 +369,7 @@ const rows=games.slice(0,5).map(g=>`
 <td>${g.gf}–${g.ga}</td>
 <td class="${g.result==="V"?"good":g.result==="H"?"bad":"warn"}">${g.result}</td>
 </tr>`).join("");
+
 return `
 <div class="panel">
 <h2>${esc(name(code))}</h2>
@@ -311,7 +378,7 @@ ${standingsHTML(standing)}
 <div class="section">
 <h3>Viimeaikainen vire</h3>
 <div class="grid">
-<div class="stat"><div class="small">Viimeiset 10 ottelua</div><div class="value">${s?s.wins+" voittoa":"–"}</div></div>
+<div class="stat"><div class="small">Viimeiset 10 ottelua ennen valittua päivää</div><div class="value">${s?s.wins+" voittoa":"–"}</div></div>
 <div class="stat"><div class="small">Tehdyt / päästetyt maalit ottelussa</div><div class="value">${s?s.gf.toFixed(1)+" / "+s.ga.toFixed(1):"–"}</div></div>
 </div>
 </div>
@@ -320,7 +387,7 @@ ${standingsHTML(standing)}
 ${fatigueHTML(f)}
 </div>
 <div class="section">
-<h3>Viimeiset viisi ottelua</h3>
+<h3>Viimeiset viisi ottelua ennen valittua päivää</h3>
 ${rows?`<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Tulos</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:`<p class="muted">Ottelutietoja ei saatavilla.</p>`}
 </div>
 <div class="section">
@@ -365,14 +432,25 @@ score+=injuryB-injuryA;
 reasons.push("Loukkaantumiset ja poissaolot");
 }
 
-score+=3; // Kotietu
+score+=3;
 const a=Math.max(10,Math.min(90,50+score));
 return {a,b:100-a,reasons};
 }
 
 async function analyze(){
-const a=$("teamA").value,b=$("teamB").value;
-if(a===b){setStatus("Valitse kaksi eri joukkuetta.");return}
+const a=$("teamA").value;
+const b=$("teamB").value;
+const targetDate=$("gameDate").value;
+
+if(!targetDate){
+setStatus("Valitse ottelupäivä.");
+return;
+}
+if(a===b){
+setStatus("Valitse kaksi eri joukkuetta.");
+return;
+}
+
 const btn=$("analyzeBtn");
 btn.disabled=true;
 $("output").innerHTML="";
@@ -388,9 +466,14 @@ fetchInjuries().then(data=>({ok:true,data})).catch(error=>({ok:false,error}))
 
 const injuries=injuryResult.ok?injuryResult.data:[];
 const ta=getStanding(table,a),tb=getStanding(table,b);
-const ga=recentGames(sa,a),gb=recentGames(sb,b);
-const sta=summary(ga.slice(0,10)),stb=summary(gb.slice(0,10));
-const fa=fatigue(sa,a),fb=fatigue(sb,b);
+
+// Kaikki otteluhistoria rajataan valittuun ottelupäivään.
+const ga=recentGames(sa,a,targetDate);
+const gb=recentGames(sb,b,targetDate);
+const sta=summary(ga.slice(0,10));
+const stb=summary(gb.slice(0,10));
+const fa=fatigue(sa,a,targetDate);
+const fb=fatigue(sb,b,targetDate);
 
 const ia=injuryImpact(injuries,a,injuryResult.ok);
 const ib=injuryImpact(injuries,b,injuryResult.ok);
@@ -400,6 +483,7 @@ const p=prediction(sta,stb,ta,tb,fa,fb,ia,ib);
 $("output").innerHTML=`
 <div class="panel">
 <h2>Ottelun voittaja-arvio</h2>
+<p class="small">Analysoitava ottelupäivä: <b>${esc(targetDate)}</b></p>
 <div class="grid">
 <div class="stat">
 <div class="small">${esc(name(a))}</div>
@@ -412,24 +496,21 @@ $("output").innerHTML=`
 <div class="bar"><span style="width:${p.b}%"></span></div>
 </div>
 </div>
-
 <p class="note">Arvio huomioi viimeaikaisen vireen, sarjasijoituksen, lepopäivät, otteluruuhkan ja raportoidut poissaolot. Poissaolojen painotus on alustava: maalivahdin poissaolo vaikuttaa enemmän. Kotietu on mukana. Aloittavaa maalivahtia ei arvata.</p>
-
 ${ia!==null&&ib!==null?
 `<p class="small">Poissaolojen arvioitu vaikutus: ${esc(name(a))} −${ia.toFixed(1)} · ${esc(name(b))} −${ib.toFixed(1)} prosenttiyksikköä.</p>`:
 `<p class="small warn">Poissaolotietoja ei saatu, joten niitä ei huomioitu voittoprosentissa.</p>`}
-
 <h3>Arviossa huomioidut tekijät</h3>
 <p class="small">${p.reasons.map(esc).join(" · ")} · Kotietu</p>
 </div>
 
 <div class="grid">
-${teamPanel(a,sa,ta,injuries,injuryResult.ok)}
-${teamPanel(b,sb,tb,injuries,injuryResult.ok)}
+${teamPanel(a,sa,ta,injuries,injuryResult.ok,targetDate)}
+${teamPanel(b,sb,tb,injuries,injuryResult.ok,targetDate)}
 </div>`;
 
 setStatus(injuryResult.ok?
-"Analyysi valmis. Tarkista myös mahdolliset puutteet poissaoloraportissa.":
+"Analyysi valmis ottelupäivälle "+targetDate+". Tarkista myös mahdolliset puutteet poissaoloraportissa.":
 "Analyysi valmis, mutta ESPN:n poissaolotietoja ei saatu.");
 }catch(e){
 console.error(e);
@@ -445,6 +526,7 @@ $("teamA").innerHTML=options;
 $("teamB").innerHTML=options;
 $("teamA").value="WPG";
 $("teamB").value="NJD";
+$("gameDate").value=today();
 }
 init();
 </script>
