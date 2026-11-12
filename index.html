@@ -282,7 +282,7 @@ const rest=gap===null?null:Math.max(0,gap-1);
 const count=days=>games.filter(g=>{
 const d=diffDays(g.date,targetDate);
 return d>=1&&d<=days;
-}).length;
+}
 
 const last4=count(4);
 const last7=count(7);
