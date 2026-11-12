@@ -301,6 +301,7 @@ const better=h>a?$("home").value:$("away").value;
 
 return `<li>${label}: etu joukkueella <b>${name(better)}</b>.</li>`;
 }
+  let latestPrediction = null;
 
 async function analyze(){
 const button=$("analyze");
@@ -369,6 +370,17 @@ const awayWin=100-homeWin;
 
 const winner=homeWin>=awayWin?hc:ac;
 const probability=Math.max(homeWin,awayWin);
+  latestPrediction = {
+home: hc,
+away: ac,
+winner: homeWin >= awayWin ? hc : ac,
+homeWin: homeWin,
+awayWin: awayWin,
+date: new Date().toISOString(),
+result: "odottaa"
+};
+
+$("savePrediction").disabled = false;
 
 let confidence="Tasainen ottelu";
 let confidenceClass="yellow";
@@ -480,7 +492,27 @@ return `<div class="game">
 $("games").innerHTML="<span class='error'>Ottelutietoja ei saatu: "+e.message+"</span>";
 }
 }
+function savePrediction(){
+if(!latestPrediction)return;
 
+let saved=[];
+try{
+saved=JSON.parse(localStorage.getItem("nhlPredictions")||"[]");
+}catch(e){}
+
+saved.push({
+...latestPrediction,
+id:Date.now()
+});
+
+localStorage.setItem("nhlPredictions",JSON.stringify(saved));
+
+$("savePrediction").disabled=true;
+$("status").innerHTML="<span class='good'>Ennuste tallennettu!</span>";
+alert("Ennuste tallennettu onnistuneesti!");
+}
+
+$("savePrediction").addEventListener("click",savePrediction);
 $("analyze").addEventListener("click",analyze);
 $("refresh").addEventListener("click",loadGames);
 
