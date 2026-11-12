@@ -238,7 +238,6 @@ return `
 <div class="grid">
 <div class="stat"><div class="small">Koko NHL</div><div class="rank">${standingRank(s.leagueSequence)}</div></div>
 <div class="stat"><div class="small">Konferenssi</div><div class="rank">${standingRank(s.conferenceSequence)}</div></div>
-<div class="stat"><div class="small">Divisioona</div><div class="rank">${standingRank(s.divisionSequence)}</div></div>
 <div class="stat"><div class="small">Pisteet</div><div class="value">${s.points??"–"}</div></div>
 <div class="stat"><div class="small">Ottelut pelattu</div><div class="value">${s.gamesPlayed??"–"}</div></div>
 <div class="stat"><div class="small">Voitot–tappiot–jatkoaikatappiot</div><div class="value">${s.wins??"–"}–${s.losses??"–"}–${s.otLosses??"–"}</div></div>
@@ -271,6 +270,26 @@ return `<div class="injury">
 <div class="small">${esc(i.position||"Pelipaikka ei tiedossa")} · ${esc(i.detail||"Lisätietoa ei ilmoitettu")}${i.returnDate?" · Arvioitu paluu: "+esc(i.returnDate):""}</div>
 </div>`;
 }).join("");
+}
+
+/* Poissaolojen alustava painotus voittaja-arviossa. */
+function injuryImpact(list,code,ok){
+if(!ok)return null;
+let impact=0;
+const rows=list.filter(i=>matchesTeam(i.team,code));
+
+for(const i of rows){
+const kind=injuryKind(i.status);
+const position=String(i.position||"").toUpperCase();
+const goalie=position==="G";
+
+if(kind==="out"){
+impact+=goalie?5:1.6;
+}else if(kind==="day"){
+impact+=goalie?2.5:0.7;
+}
+}
+return Math.min(8,impact);
 }
 
 function teamPanel(code,schedule,standing,injuries,injuryOK){
@@ -315,14 +334,16 @@ ${injuriesHTML(injuries,code,injuryOK)}
 </div>`;
 }
 
-function prediction(statsA,statsB,standA,standB,fatA,fatB){
+function prediction(statsA,statsB,standA,standB,fatA,fatB,injuryA,injuryB){
 let score=0;
 const reasons=[];
+
 if(statsA&&statsB){
 score+=(statsA.winRate-statsB.winRate)*24;
 score+=(statsA.goalDiff-statsB.goalDiff)*2;
 reasons.push("Viimeisten otteluiden vire ja maaliero");
 }
+
 if(standA&&standB){
 const a=Number(standA.pointPctg),b=Number(standB.pointPctg);
 if(Number.isFinite(a)&&Number.isFinite(b)){
@@ -330,6 +351,7 @@ score+=(a-b)*18;
 reasons.push("Sarjataulukon pisteprosentti");
 }
 }
+
 if(fatA&&fatB){
 score+=(fatB.penalty-fatA.penalty)*1.5;
 if(fatA.rest!==null&&fatB.rest!==null){
@@ -337,6 +359,12 @@ score+=Math.max(-3,Math.min(3,(fatB.rest-fatA.rest)*1.1));
 }
 reasons.push("Ottelurasitus ja lepopäivät");
 }
+
+if(injuryA!==null&&injuryB!==null){
+score+=injuryB-injuryA;
+reasons.push("Loukkaantumiset ja poissaolot");
+}
+
 score+=3; // Kotietu
 const a=Math.max(10,Math.min(90,50+score));
 return {a,b:100-a,reasons};
@@ -357,30 +385,52 @@ fetchNHL(`/club-schedule-season/${b}/now`),
 fetchNHL("/standings/now"),
 fetchInjuries().then(data=>({ok:true,data})).catch(error=>({ok:false,error}))
 ]);
+
 const injuries=injuryResult.ok?injuryResult.data:[];
 const ta=getStanding(table,a),tb=getStanding(table,b);
 const ga=recentGames(sa,a),gb=recentGames(sb,b);
 const sta=summary(ga.slice(0,10)),stb=summary(gb.slice(0,10));
 const fa=fatigue(sa,a),fb=fatigue(sb,b);
-const p=prediction(sta,stb,ta,tb,fa,fb);
+
+const ia=injuryImpact(injuries,a,injuryResult.ok);
+const ib=injuryImpact(injuries,b,injuryResult.ok);
+
+const p=prediction(sta,stb,ta,tb,fa,fb,ia,ib);
 
 $("output").innerHTML=`
 <div class="panel">
 <h2>Ottelun voittaja-arvio</h2>
 <div class="grid">
-<div class="stat"><div class="small">${esc(name(a))}</div><div class="prob">${p.a.toFixed(1)} %</div><div class="bar"><span style="width:${p.a}%"></span></div></div>
-<div class="stat"><div class="small">${esc(name(b))}</div><div class="prob">${p.b.toFixed(1)} %</div><div class="bar"><span style="width:${p.b}%"></span></div></div>
+<div class="stat">
+<div class="small">${esc(name(a))}</div>
+<div class="prob">${p.a.toFixed(1)} %</div>
+<div class="bar"><span style="width:${p.a}%"></span></div>
 </div>
-<p class="note">Arvio huomioi viimeaikaisen vireen, sarjasijoituksen, lepopäivät ja otteluruuhkan. Kotietu on mukana. Loukkaantumisia ja maalivahtien tasoa ei ole vielä painotettu prosenttilaskennassa.</p>
+<div class="stat">
+<div class="small">${esc(name(b))}</div>
+<div class="prob">${p.b.toFixed(1)} %</div>
+<div class="bar"><span style="width:${p.b}%"></span></div>
+</div>
+</div>
+
+<p class="note">Arvio huomioi viimeaikaisen vireen, sarjasijoituksen, lepopäivät, otteluruuhkan ja raportoidut poissaolot. Poissaolojen painotus on alustava: maalivahdin poissaolo vaikuttaa enemmän. Kotietu on mukana. Aloittavaa maalivahtia ei arvata.</p>
+
+${ia!==null&&ib!==null?
+`<p class="small">Poissaolojen arvioitu vaikutus: ${esc(name(a))} −${ia.toFixed(1)} · ${esc(name(b))} −${ib.toFixed(1)} prosenttiyksikköä.</p>`:
+`<p class="small warn">Poissaolotietoja ei saatu, joten niitä ei huomioitu voittoprosentissa.</p>`}
+
 <h3>Arviossa huomioidut tekijät</h3>
 <p class="small">${p.reasons.map(esc).join(" · ")} · Kotietu</p>
 </div>
+
 <div class="grid">
 ${teamPanel(a,sa,ta,injuries,injuryResult.ok)}
 ${teamPanel(b,sb,tb,injuries,injuryResult.ok)}
 </div>`;
 
-setStatus(injuryResult.ok?"Analyysi valmis. Tarkista myös mahdolliset puutteet poissaoloraportissa.":"Analyysi valmis, mutta ESPN:n poissaolotietoja ei saatu.");
+setStatus(injuryResult.ok?
+"Analyysi valmis. Tarkista myös mahdolliset puutteet poissaoloraportissa.":
+"Analyysi valmis, mutta ESPN:n poissaolotietoja ei saatu.");
 }catch(e){
 console.error(e);
 setStatus("Tietojen haku epäonnistui: "+e.message+". Yritä hetken päästä uudelleen.");
