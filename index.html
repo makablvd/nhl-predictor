@@ -29,6 +29,12 @@ th{color:#38bdf8}
 .result{font-size:18px;font-weight:bold}
 #status{color:#facc15;font-size:13px}
 .small{font-size:12px;color:#91a5bc}
+.injury{padding:10px 0;border-bottom:1px solid #30445d}
+.injury:last-child{border-bottom:0}
+.tag{display:inline-block;padding:4px 7px;border-radius:5px;font-size:11px;font-weight:bold;background:#334155;margin-top:4px}
+.tag.out{background:#7f1d1d;color:#fecaca}
+.tag.uncertain{background:#713f12;color:#fde68a}
+a{color:#38bdf8}
 </style>
 </head>
 <body>
@@ -55,8 +61,9 @@ th{color:#38bdf8}
 <div id="output"></div>
 
 <script>
-const API="https://api-web.nhle.com/v1";
-const PROXY="https://proxy.cors.dev/";
+const NHL_API="https://api-web.nhle.com/v1";
+const NHL_PROXY="https://proxy.cors.dev/";
+const ESPN_INJURIES="https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries";
 
 const teams=[
 ["ANA","Anaheim Ducks"],
@@ -97,14 +104,12 @@ const homeSelect=document.getElementById("home");
 const awaySelect=document.getElementById("away");
 
 teams.forEach(t=>{
- const option1=document.createElement("option");
- option1.value=t[0];
- option1.textContent=t[1];
-
- const option2=option1.cloneNode(true);
-
- homeSelect.appendChild(option1);
- awaySelect.appendChild(option2);
+ const o1=document.createElement("option");
+ o1.value=t[0];
+ o1.textContent=t[1];
+ const o2=o1.cloneNode(true);
+ homeSelect.appendChild(o1);
+ awaySelect.appendChild(o2);
 });
 
 homeSelect.value="WPG";
@@ -115,27 +120,241 @@ function teamName(code){
  return t?t[1]:code;
 }
 
-async function fetchData(path){
- const url=PROXY+API+path;
-
- const response=await fetch(url,{
+async function fetchNHL(path){
+ const response=await fetch(NHL_PROXY+NHL_API+path,{
   method:"GET",
   credentials:"omit"
  });
+ if(!response.ok) throw new Error("NHL API HTTP "+response.status);
+ return response.json();
+}
 
- if(!response.ok){
-  let detail="";
-  try{
-   detail=await response.text();
-  }catch(e){}
+/* ESPN: julkinen NHL-loukkaantumisraportti.
+   Tyhjä tai tuntematon vastaus EI tarkoita tervettä joukkuetta. */
+async function fetchInjuries(){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),12000);
 
-  throw new Error(
-   "HTTP "+response.status+
-   (detail?" – "+detail.slice(0,120):"")
-  );
+ try{
+  const response=await fetch(ESPN_INJURIES,{
+   method:"GET",
+   credentials:"omit",
+   signal:controller.signal
+  });
+
+  if(!response.ok){
+   throw new Error("ESPN HTTP "+response.status);
+  }
+
+  const data=await response.json();
+  return parseInjuries(data);
+ }finally{
+  clearTimeout(timer);
+ }
+}
+
+function textValue(value){
+ if(value===null||value===undefined)return "";
+ if(typeof value==="string"||typeof value==="number")return String(value);
+ if(typeof value==="object"){
+  return value.displayName||value.name||value.abbreviation||value.description||"";
+ }
+ return "";
+}
+
+function parseInjuries(data){
+ const found=[];
+ const seen=new Set();
+
+ function walk(node,inheritedTeam){
+  if(!node||typeof node!=="object")return;
+
+  if(Array.isArray(node)){
+   node.forEach(item=>walk(item,inheritedTeam));
+   return;
+  }
+
+  const teamObject=node.team||node.teamInfo||{};
+  const teamCode=
+   textValue(teamObject.abbreviation)||
+   textValue(teamObject.shortDisplayName)||
+   textValue(node.teamAbbreviation)||
+   inheritedTeam||
+   "";
+
+  const athlete=node.athlete||node.player||{};
+  const injury=node.injury||node;
+
+  if(Object.keys(athlete).length){
+   const name=
+    textValue(athlete.displayName)||
+    textValue(athlete.fullName)||
+    textValue(athlete.name);
+
+   const status=
+    textValue(injury.status)||
+    textValue(node.status)||
+    textValue(node.injuryStatus);
+
+   const position=
+    textValue(athlete.position);
+
+   const type=
+    textValue(injury.type)||
+    textValue(injury.details)||
+    textValue(injury.description)||
+    textValue(node.description);
+
+   const comment=
+    textValue(injury.longComment)||
+    textValue(injury.shortComment)||
+    textValue(node.description);
+
+   if(name&&status){
+    const key=[name,teamCode,status].join("|").toLowerCase();
+
+    if(!seen.has(key)){
+     seen.add(key);
+     found.push({
+      name,
+      teamCode,
+      teamName:
+       textValue(teamObject.displayName)||
+       textValue(teamObject.name),
+      status,
+      position,
+      type,
+      comment,
+      date:
+       textValue(injury.date)||
+       textValue(injury.updateDate)||
+       textValue(node.date)
+     });
+    }
+   }
+  }
+
+  for(const [key,value] of Object.entries(node)){
+   if(value&&typeof value==="object"){
+    walk(value,teamCode);
+   }
+  }
  }
 
- return await response.json();
+ walk(data,"");
+
+ return found;
+}
+
+function normalize(value){
+ return String(value||"")
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g,"");
+}
+
+function injuryBelongsToTeam(injury,code){
+ const aliases={
+  ANA:["ana","anaheimducks"],
+  BOS:["bos","bostonbruins"],
+  BUF:["buf","buffalosabres"],
+  CGY:["cgy","calgaryflames"],
+  CAR:["car","carolinahurricanes"],
+  CHI:["chi","chicagoblackhawks"],
+  COL:["col","coloradoavalanche"],
+  CBJ:["cbj","columbusbluejackets"],
+  DAL:["dal","dallasstars"],
+  DET:["det","detroitredwings"],
+  EDM:["edm","edmontonoilers"],
+  FLA:["fla","floridapanthers"],
+  LAK:["lak","losangeleskings"],
+  MIN:["min","minnesotawild"],
+  MTL:["mtl","montrealcanadiens"],
+  NSH:["nsh","nashvillepredators"],
+  NJD:["njd","newjerseydevils"],
+  NYI:["nyi","newyorkislanders"],
+  NYR:["nyr","newyorkrangers"],
+  OTT:["ott","ottawasenators"],
+  PHI:["phi","philadelphiaflyers"],
+  PIT:["pit","pittsburghpenguins"],
+  SJS:["sjs","sanjosesharks"],
+  SEA:["sea","seattlekraken"],
+  STL:["stl","stlouisblues"],
+  TBL:["tbl","tampabaylightning"],
+  TOR:["tor","torontomapleleafs"],
+  UTA:["uta","utahmammoth"],
+  VAN:["van","vancouvercanucks"],
+  VGK:["vgk","vegasgoldenknights"],
+  WSH:["wsh","washingtoncapitals"],
+  WPG:["wpg","winnipegjets"]
+ };
+
+ const accepted=aliases[code]||[normalize(code)];
+ return accepted.includes(normalize(injury.teamCode))||
+        accepted.includes(normalize(injury.teamName));
+}
+
+function isConfirmedOut(status){
+ const s=normalize(status);
+ return s.includes("out")||
+        s.includes("injuredreserve")||
+        s==="ir"||
+        s.includes("suspended")||
+        s.includes("seasonending");
+}
+
+function isUncertain(status){
+ const s=normalize(status);
+ return s.includes("daytoday")||
+        s.includes("questionable")||
+        s.includes("doubtful")||
+        s.includes("game-time")||
+        s.includes("gtd");
+}
+
+function escapeHTML(value){
+ return String(value||"").replace(/[&<>"']/g,char=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  '"':"&quot;",
+  "'":"&#39;"
+ }[char]));
+}
+
+function renderInjuries(allInjuries,code){
+ if(!Array.isArray(allInjuries)){
+  return "<p class='yellow'>Loukkaantumistietoja ei saatu luettua.</p>";
+ }
+
+ const list=allInjuries.filter(x=>injuryBelongsToTeam(x,code));
+
+ if(!list.length){
+  return `
+   <p class="yellow">ESPN ei palauttanut tälle joukkueelle vahvistettuja loukkaantumistietoja.</p>
+   <p class="small">
+    Tämä ei tarkoita, että kaikki pelaajat olisivat pelikunnossa.
+    Tietoa ei käytetä ennusteen muuttamiseen.
+   </p>`;
+ }
+
+ return list.map(player=>{
+  const out=isConfirmedOut(player.status);
+  const uncertain=isUncertain(player.status);
+  const tagClass=out?"out":uncertain?"uncertain":"";
+  const tagText=out?"POISSAOLO":uncertain?"EPÄVARMA":"ESPN:N ILMOITTAMA";
+
+  return `
+   <div class="injury">
+    <strong>${escapeHTML(player.name)}</strong>
+    <div class="small">
+     ${escapeHTML(player.position||"Pelipaikkaa ei ilmoitettu")}
+     ${player.type?" · "+escapeHTML(player.type):""}
+    </div>
+    <span class="tag ${tagClass}">${tagText}: ${escapeHTML(player.status)}</span>
+    ${player.comment?`<p class="small">${escapeHTML(player.comment)}</p>`:""}
+    ${player.date?`<p class="small">Päivitys/lähteen päiväys: ${escapeHTML(player.date)}</p>`:""}
+   </div>`;
+ }).join("");
 }
 
 function isFinished(game){
@@ -164,14 +383,11 @@ function average(list,key){
 
 function winRate(list){
  if(!list.length)return 50;
-
  let points=0;
-
  list.forEach(game=>{
-  if(game.goals>game.against)points+=1;
+  if(game.goals>game.against)points++;
   else if(game.goals===game.against)points+=0.5;
  });
-
  return points/list.length*100;
 }
 
@@ -185,51 +401,36 @@ function clamp(value,min,max){
 
 function restDays(list){
  if(!list.length)return null;
-
  const lastDate=new Date(list[0].date+"T12:00:00");
  const now=new Date();
-
- return Math.max(
-  0,
-  Math.floor((now-lastDate)/86400000)
- );
+ return Math.max(0,Math.floor((now-lastDate)/86400000));
 }
 
 function renderHistory(list){
- if(!list.length){
-  return "<p>Ottelutietoja ei löytynyt.</p>";
- }
+ if(!list.length)return "<p>Ottelutietoja ei löytynyt.</p>";
 
  return `
  <table>
- <tr>
- <th>Päivä</th>
- <th>Vastustaja</th>
- <th>Tulos</th>
- <th>Tulos</th>
- </tr>
- ${
-  list.map(game=>{
-   const won=game.goals>game.against;
-   const lost=game.goals<game.against;
-
-   return `
+ <tr><th>Päivä</th><th>Vastustaja</th><th>Tulos</th><th>Tulos</th></tr>
+ ${list.map(game=>{
+  const won=game.goals>game.against;
+  const lost=game.goals<game.against;
+  return `
    <tr>
-    <td>${game.date}</td>
-    <td>${teamName(game.opponent)}</td>
+    <td>${escapeHTML(game.date)}</td>
+    <td>${escapeHTML(teamName(game.opponent))}</td>
     <td>${game.goals}–${game.against}</td>
     <td class="${won?"good":lost?"bad":"yellow"}">
-    ${won?"VOITTO":lost?"TAPPIO":"TASAN"}
+     ${won?"VOITTO":lost?"TAPPIO":"TASAN"}
     </td>
    </tr>`;
-  }).join("")
- }
+ }).join("")}
  </table>`;
 }
 
 function findStanding(standings,code){
  return standings.find(item=>
-  item.teamAbbrev?.default===code ||
+  item.teamAbbrev?.default===code||
   item.teamAbbrev===code
  );
 }
@@ -242,7 +443,6 @@ function safeNumber(value){
 async function analyze(){
  const h=homeSelect.value;
  const a=awaySelect.value;
-
  const status=document.getElementById("status");
  const output=document.getElementById("output");
  const button=document.getElementById("analyze");
@@ -254,14 +454,23 @@ async function analyze(){
 
  button.disabled=true;
  output.innerHTML="";
- status.textContent="Haetaan NHL:n ottelutilastoja...";
+ status.textContent="Haetaan NHL:n ottelutilastoja ja ESPN:n loukkaantumistietoja...";
 
  try{
   const [homeData,awayData,standingsData]=await Promise.all([
-   fetchData("/club-schedule-season/"+h+"/now"),
-   fetchData("/club-schedule-season/"+a+"/now"),
-   fetchData("/standings/now")
+   fetchNHL("/club-schedule-season/"+h+"/now"),
+   fetchNHL("/club-schedule-season/"+a+"/now"),
+   fetchNHL("/standings/now")
   ]);
+
+  let injuries=[];
+  let injuryError="";
+
+  try{
+   injuries=await fetchInjuries();
+  }catch(error){
+   injuryError=String(error.message||error);
+  }
 
   const homeGames=(homeData.games||[])
    .filter(isFinished)
@@ -275,46 +484,33 @@ async function analyze(){
 
   const home5=homeGames.slice(0,5);
   const away5=awayGames.slice(0,5);
-
   const home10=homeGames.slice(0,10);
   const away10=awayGames.slice(0,10);
 
-  const homeAtHome=homeGames
-   .filter(game=>game.home)
-   .slice(0,10);
-
-  const awayOnRoad=awayGames
-   .filter(game=>!game.home)
-   .slice(0,10);
+  const homeAtHome=homeGames.filter(game=>game.home).slice(0,10);
+  const awayOnRoad=awayGames.filter(game=>!game.home).slice(0,10);
 
   const h2h=(homeData.games||[])
    .filter(game=>{
     const home=game.homeTeam?.abbrev;
     const away=game.awayTeam?.abbrev;
-
-    return (
-     (home===h&&away===a)||
-     (home===a&&away===h)
-    );
+    return (home===h&&away===a)||(home===a&&away===h);
    })
    .filter(isFinished)
    .sort((x,y)=>y.gameDate.localeCompare(x.gameDate))
    .slice(0,5);
 
   const standings=standingsData.standings||[];
-
   const hs=findStanding(standings,h);
   const as=findStanding(standings,a);
 
   const hRecent=winRate(home10);
   const aRecent=winRate(away10);
-
   const hHome=winRate(homeAtHome);
   const aAway=winRate(awayOnRoad);
 
   const hGoals=average(home10,"goals");
   const aGoals=average(away10,"goals");
-
   const hAgainst=average(home10,"against");
   const aAgainst=average(away10,"against");
 
@@ -323,14 +519,11 @@ async function analyze(){
 
   const h2hHistory=h2h.map(game=>{
    const homeCode=game.homeTeam?.abbrev;
-   const awayCode=game.awayTeam?.abbrev;
-
    const selectedHomeGoals=Number(
     homeCode===h?game.homeTeam.score:game.awayTeam.score
    );
-
    const selectedAwayGoals=Number(
-    awayCode===a?game.awayTeam.score:game.homeTeam.score
+    homeCode===a?game.homeTeam.score:game.awayTeam.score
    );
 
    if(selectedHomeGoals>selectedAwayGoals)h2hHomeWins++;
@@ -338,32 +531,25 @@ async function analyze(){
 
    return {
     date:game.gameDate,
-    opponent:homeCode===h?a:h,
+    opponent:a,
     goals:selectedHomeGoals,
     against:selectedAwayGoals
    };
   });
 
   let homeScore=50;
-
   homeScore+=(hRecent-aRecent)*0.22;
   homeScore+=(hHome-aAway)*0.18;
   homeScore+=(hGoals-aGoals)*3;
   homeScore+=(aAgainst-hAgainst)*2;
-
-  // Kotietu
   homeScore+=4;
 
   if(hs&&as){
    const homePoints=safeNumber(hs.points);
    const awayPoints=safeNumber(as.points);
-
    const homeGP=Math.max(1,safeNumber(hs.gamesPlayed));
    const awayGP=Math.max(1,safeNumber(as.gamesPlayed));
-
-   homeScore+=(
-    homePoints/homeGP-awayPoints/awayGP
-   )*1.5;
+   homeScore+=(homePoints/homeGP-awayPoints/awayGP)*1.5;
   }
 
   if(h2hHistory.length){
@@ -375,148 +561,106 @@ async function analyze(){
 
   const hRest=restDays(homeGames);
   const aRest=restDays(awayGames);
-
   const hName=teamName(h);
   const aName=teamName(a);
-
   const favorite=homeScore>=50?hName:aName;
+
+  const hInjuries=injuries.filter(x=>injuryBelongsToTeam(x,h));
+  const aInjuries=injuries.filter(x=>injuryBelongsToTeam(x,a));
 
   output.innerHTML=`
 
   <div class="card">
    <h2>🏆 OTTELUENNUSTE</h2>
-
    <div class="teams">
     <div>
      <div class="muted">${hName}</div>
      <div class="big">${pct(homeScore)}</div>
     </div>
-
     <div>
      <div class="muted">${aName}</div>
      <div class="big">${pct(awayScore)}</div>
     </div>
    </div>
-
-   <div class="bar">
-    <span style="width:${homeScore}%"></span>
-   </div>
-
+   <div class="bar"><span style="width:${homeScore}%"></span></div>
    <div class="result">${favorite} – ennusteen suosikki</div>
-
    <p class="small">
-    Tilastollinen arvio, ei varma lopputulos.
-    Todennäköisyys ei ole vedonlyöntimarkkinan kerroin.
+    Tilastollinen arvio. Ei varma lopputulos eikä vedonlyöntivihje.
+    Loukkaantumistietoja ei ole vielä painotettu prosenttilaskelmassa.
+   </p>
+  </div>
+
+  <div class="card">
+   <h2>🏥 LOUKKAANTUMISET JA POISSAOLOT</h2>
+   ${injuryError?`
+    <p class="bad">ESPN:n tietojen haku epäonnistui.</p>
+    <p class="small">${escapeHTML(injuryError)}</p>
+    <p class="small">Poissaoloja ei voida tällä kertaa vahvistaa.</p>
+   `:`
+    <p class="small">Tietolähde: ESPN:n julkinen NHL-raportti.</p>
+    <h3>${hName}</h3>
+    ${renderInjuries(injuries,h)}
+    <h3>${aName}</h3>
+    ${renderInjuries(injuries,a)}
+   `}
+   <p class="small">
+    <a href="https://www.espn.com/nhl/injuries" target="_blank" rel="noopener">
+     Avaa ESPN:n NHL-loukkaantumisraportti
+    </a>
+   </p>
+   <p class="small">
+    ESPN:n ilmoittamat tiedot eivät aina kerro varmasti, pelaako henkilö
+    seuraavassa ottelussa. Varmista kokoonpano ennen ottelua.
+   </p>
+  </div>
+
+  <div class="card">
+   <h2>🧤 MAALIVAHDIT</h2>
+   <p class="yellow">
+    Aloittavia maalivahteja ei ole tässä versiossa vahvistettu.
+    Niitä ei arvata.
+   </p>
+   <p class="small">
+    Maalivahtitietoja ei ole sisällytetty voittotodennäköisyyteen.
    </p>
   </div>
 
   <div class="card">
    <h2>📊 VIIMEAIKAINEN VIRE</h2>
-
    <table>
-    <tr>
-     <th>Tilasto</th>
-     <th>${h}</th>
-     <th>${a}</th>
-    </tr>
-
-    <tr>
-     <td>Viimeiset 5</td>
-     <td>${pct(winRate(home5))}</td>
-     <td>${pct(winRate(away5))}</td>
-    </tr>
-
-    <tr>
-     <td>Viimeiset 10</td>
-     <td>${pct(hRecent)}</td>
-     <td>${pct(aRecent)}</td>
-    </tr>
-
-    <tr>
-     <td>Tehdyt maalit / peli</td>
-     <td>${hGoals.toFixed(2)}</td>
-     <td>${aGoals.toFixed(2)}</td>
-    </tr>
-
-    <tr>
-     <td>Päästetyt maalit / peli</td>
-     <td>${hAgainst.toFixed(2)}</td>
-     <td>${aAgainst.toFixed(2)}</td>
-    </tr>
-
-    <tr>
-     <td>Päiviä viime pelistä</td>
-     <td>${hRest===null?"-":hRest}</td>
-     <td>${aRest===null?"-":aRest}</td>
-    </tr>
+    <tr><th>Tilasto</th><th>${h}</th><th>${a}</th></tr>
+    <tr><td>Viimeiset 5</td><td>${pct(winRate(home5))}</td><td>${pct(winRate(away5))}</td></tr>
+    <tr><td>Viimeiset 10</td><td>${pct(hRecent)}</td><td>${pct(aRecent)}</td></tr>
+    <tr><td>Tehdyt maalit / peli</td><td>${hGoals.toFixed(2)}</td><td>${aGoals.toFixed(2)}</td></tr>
+    <tr><td>Päästetyt maalit / peli</td><td>${hAgainst.toFixed(2)}</td><td>${aAgainst.toFixed(2)}</td></tr>
+    <tr><td>Päiviä viime pelistä</td><td>${hRest===null?"-":hRest}</td><td>${aRest===null?"-":aRest}</td></tr>
    </table>
   </div>
 
   <div class="card">
    <h2>🏠 KOTI- JA VIERASVIRE</h2>
-
    <table>
-    <tr>
-     <th>Tilasto</th>
-     <th>${h}</th>
-     <th>${a}</th>
-    </tr>
-
-    <tr>
-     <td>Kotipelien voitto-osuus</td>
-     <td>${pct(hHome)}</td>
-     <td>-</td>
-    </tr>
-
-    <tr>
-     <td>Vierasotteluiden voitto-osuus</td>
-     <td>-</td>
-     <td>${pct(aAway)}</td>
-    </tr>
+    <tr><th>Tilasto</th><th>${h}</th><th>${a}</th></tr>
+    <tr><td>Kotipelien voitto-osuus</td><td>${pct(hHome)}</td><td>-</td></tr>
+    <tr><td>Vierasotteluiden voitto-osuus</td><td>-</td><td>${pct(aAway)}</td></tr>
    </table>
-
-   <p class="small">
-    Käytettävissä olevat viimeisimmät koti- ja vierasottelut.
-   </p>
   </div>
 
   <div class="card">
    <h2>🤝 KESKINÄISET KOHTAAMISET</h2>
-
    <p>Viimeisimmät löydetyt kohtaamiset: ${h2hHistory.length}</p>
    <p>${hName}: ${h2hHomeWins} voittoa</p>
    <p>${aName}: ${h2hAwayWins} voittoa</p>
-
    ${renderHistory(h2hHistory)}
   </div>
 
   <div class="card">
    <h2>📈 SARJATAULUKKO</h2>
-
    <table>
-    <tr>
-     <th>Tilasto</th>
-     <th>${h}</th>
-     <th>${a}</th>
-    </tr>
-
-    <tr>
-     <td>Pisteet</td>
-     <td>${hs?.points??"-"}</td>
-     <td>${as?.points??"-"}</td>
-    </tr>
-
-    <tr>
-     <td>Voitot</td>
-     <td>${hs?.wins??"-"}</td>
-     <td>${as?.wins??"-"}</td>
-    </tr>
-
-    <tr>
-     <td>Ottelut</td>
-     <td>${hs?.gamesPlayed??"-"}</td>
-     <td>${as?.gamesPlayed??"-"}</td>
-    </tr>
+    <tr><th>Tilasto</th><th>${h}</th><th>${a}</th></tr>
+    <tr><td>Pisteet</td><td>${hs?.points??"-"}</td><td>${as?.points??"-"}</td></tr>
+    <tr><td>Voitot</td><td>${hs?.wins??"-"}</td><td>${as?.wins??"-"}</td></tr>
+    <tr><td>Ottelut</td><td>${hs?.gamesPlayed??"-"}</td><td>${as?.gamesPlayed??"-"}</td></tr>
    </table>
   </div>
 
@@ -531,66 +675,42 @@ async function analyze(){
   </div>
 
   <div class="card">
-   <h2>⚠️ MAALIVAHDIT JA POISSAOLOT</h2>
-
-   <p>
-    Aloittavia maalivahteja ja loukkaantumisia ei ole
-    tässä versiossa vahvistettu.
-   </p>
-
-   <p class="small">
-    Näitä tietoja ei arvata. Ne pitää tarkistaa erikseen
-    luotettavista ja ajantasaisista lähteistä.
-   </p>
-  </div>
-
-  <div class="card">
    <h2>ℹ️ ENNUSTEEN RAJOITUKSET</h2>
-
    <p>
-    Ennuste huomioi viimeaikaisen vireen, maalinteon,
-    päästetyt maalit, koti- ja vierasottelut,
-    sarjataulukon sekä keskinäiset kohtaamiset.
+    Ennuste huomioi viimeaikaisen vireen, maalinteon, päästetyt maalit,
+    koti- ja vierasottelut, sarjataulukon sekä keskinäiset kohtaamiset.
    </p>
-
    <p>
-    Se ei vielä huomioi vahvistettuja maalivahteja,
-    loukkaantumisia tai kaikkia ottelukohtaisia tekijöitä.
+    Loukkaantumisraportti näytetään erikseen, mutta sen vaikutusta
+    prosenttilaskelmaan ei ole vielä mallinnettu.
    </p>
-
+   <p>
+    Aloittavia maalivahteja ei ole vahvistettu tässä versiossa.
+   </p>
    <p class="small">
     Tilastot haetaan NHL:n rajapinnasta välityspalvelimen kautta.
+    Loukkaantumistiedot haetaan ESPN:n julkisesta rajapinnasta.
    </p>
   </div>
   `;
 
-  status.textContent="Analyysi valmis.";
+  status.textContent="Analyysi valmis. Loukkaantumistietojen tila näkyy omassa osiossaan.";
 
  }catch(error){
-
   status.textContent="Tietojen haku epäonnistui.";
-
   output.innerHTML=`
    <div class="card">
     <h2>Yhteysvirhe</h2>
-    <p>NHL:n tietoja ei saatu haettua.</p>
-    <p class="small">${String(error.message)}</p>
-    <p>
-     Tarkista verkkoyhteys ja kokeile uudelleen.
-     Jos virhe jatkuu, selvitetään välityspalvelimen vastaus.
-    </p>
-   </div>
-  `;
-
+    <p>NHL:n ottelutilastoja ei saatu haettua.</p>
+    <p class="small">${escapeHTML(error.message)}</p>
+    <p>Tarkista verkkoyhteys ja kokeile uudelleen.</p>
+   </div>`;
  }finally{
   button.disabled=false;
  }
 }
 
-document
- .getElementById("analyze")
- .addEventListener("click",analyze);
-
+document.getElementById("analyze").addEventListener("click",analyze);
 </script>
 </body>
 </html>
