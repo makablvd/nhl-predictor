@@ -241,7 +241,15 @@ async function analyze(){
  const details=document.getElementById("details");
 
  if(home.value===away.value){
- result.innerHTML="<p class='bad'>Valitse eri joukkueet.</p>";
+ }catch(e){
+ result.innerHTML="<p class='bad'>VIRHE: "+e.message+"</p>";
+ details.innerHTML="Virheen lisätiedot: "+e.message;
+ document.getElementById("form").innerHTML=
+ "Ottelutietojen haku epäonnistui.";
+}finally{
+ button.disabled=false;
+ button.textContent="ANALYSOI OTTELU";
+}
  return;
  }
 
