@@ -416,11 +416,12 @@ function competitorCode(c){
 return c?.team?.abbreviation||c?.team?.abbrev||c?.abbreviation||c?.id||"";
 }
 
-function findMatchEvent(data,hc,ac){
+function findTeamEvent(data,code){
 const events=data?.events||[];
 return events.find(event=>{
-const codes=eventCompetitors(event).map(competitorCode);
-return codes.includes(hc)&&codes.includes(ac);
+const hasTeam=eventCompetitors(event).some(c=>competitorCode(c)===code);
+const state=event?.status?.type?.state;
+return hasTeam&&(state==="pre"||state==="in"||!state);
 });
 }
 
