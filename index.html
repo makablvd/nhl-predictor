@@ -3,35 +3,37 @@
 <html lang="fi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NHL Predictor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NHL Predictor Pro</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#08111f;color:#f1f5f9;font-family:Arial,sans-serif;padding:18px}
+body{margin:0;padding:16px;background:#08111f;color:#f1f5f9;font-family:Arial,sans-serif}
 .container{max-width:850px;margin:auto}
 h1{text-align:center;color:#38bdf8;font-size:30px}
 .subtitle{text-align:center;color:#94a3b8}
 .card{background:#142238;padding:18px;border-radius:14px;margin:16px 0;border:1px solid #263a55}
-h2{font-size:19px;color:#38bdf8}
-select,button{padding:13px;border-radius:8px;border:0;font-size:15px}
-select{background:#253951;color:white;width:100%;margin:6px 0}
-button{background:#0284c7;color:white;font-weight:bold;cursor:pointer;margin:5px}
-button:hover{background:#0369a1}
+h2{color:#38bdf8;font-size:19px}
+select,button{width:100%;padding:13px;border-radius:8px;border:0;font-size:15px;margin:6px 0}
+select{background:#253951;color:white}
+button{background:#0284c7;color:white;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.5}
 .teams{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.result{font-size:25px;text-align:center;font-weight:bold;margin:15px 0}
-.small{color:#94a3b8;font-size:13px}
+.result{text-align:center;font-size:25px;font-weight:bold;margin:18px 0}
+.small{color:#94a3b8;font-size:13px;line-height:1.6}
 .bar{height:13px;background:#334155;border-radius:10px;overflow:hidden;margin:8px 0}
 .fill{height:100%;background:#38bdf8}
 .game{border-bottom:1px solid #334155;padding:12px 0}
-.green{color:#4ade80}
-.red{color:#fb7185}
+.good{color:#4ade80}
+.bad{color:#fb7185}
+.neutral{color:#facc15}
+.stat{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #334155}
 </style>
 </head>
 <body>
 <div class="container">
 
-<h1>🏒 NHL PREDICTOR</h1>
-<p class="subtitle">Otteluanalyysi ja voittotodennäköisyydet</p>
+<h1>🏒 NHL PREDICTOR PRO</h1>
+<p class="subtitle">Otteluiden vireanalyysi ja voittajaennusteet</p>
 
 <div class="card">
 <h2>Valitse ottelu</h2>
@@ -45,7 +47,7 @@ button:hover{background:#0369a1}
 <select id="away"></select>
 </div>
 </div>
-<button onclick="analyze()" style="width:100%">ANALYSOI OTTELU</button>
+<button id="analyze" onclick="analyze()">ANALYSOI OTTELU</button>
 <div id="result"></div>
 </div>
 
@@ -55,18 +57,23 @@ button:hover{background:#0369a1}
 </div>
 
 <div class="card">
-<h2>🏒 NHL – tämän hetken ottelut</h2>
-<button onclick="loadGames()">Päivitä ottelut</button>
-<div id="games">Ladataan otteluita...</div>
+<h2>🔥 Viimeiset 10 ottelua</h2>
+<div id="form">Näytetään otteluanalyysin yhteydessä.</div>
+</div>
+
+<div class="card">
+<h2>🏒 NHL:n tämän päivän ottelut</h2>
+<button onclick="loadGames()">PÄIVITÄ OTTELUT</button>
+<div id="games">Ladataan...</div>
 </div>
 
 <div class="card">
 <h2>📈 Sarjataulukko</h2>
-<div id="standings">Ladataan sarjataulukkoa...</div>
+<div id="standings">Ladataan...</div>
 </div>
 
 <p class="small" style="text-align:center">
-Data: NHL API | Ennusteet ovat tilastollisia arvioita.
+Lähde: NHL API. Ennuste on tilastollinen arvio, ei varma tulos.
 </p>
 </div>
 
@@ -106,9 +113,13 @@ home.value="WPG";
 away.value="NJD";
 
 async function getData(url){
- const response=await fetch(url);
- if(!response.ok)throw new Error("NHL API ei vastannut");
- return response.json();
+ const r=await fetch(url);
+ if(!r.ok)throw new Error("NHL API virhe");
+ return r.json();
+}
+
+function getTeam(code){
+ return standings.find(t=>t.teamAbbrev.default===code);
 }
 
 async function loadStandings(){
@@ -116,6 +127,7 @@ async function loadStandings(){
  const data=await getData(API+"/standings/now");
  standings=data.standings||[];
  standings.sort((a,b)=>b.points-a.points);
+
  document.getElementById("standings").innerHTML=
  standings.map((t,i)=>`
  <div class="game">
@@ -127,90 +139,228 @@ async function loadStandings(){
  </div>`).join("");
  }catch(e){
  document.getElementById("standings").innerHTML=
- "Sarjataulukkoa ei voitu ladata. Yritä uudelleen.";
+ "Sarjataulukkoa ei voitu ladata.";
  }
 }
 
-function getTeam(code){
- return standings.find(t=>t.teamAbbrev.default===code);
+async function getLast10(code){
+ const data=await getData(
+ API+"/club-schedule/"+code+"/now"
+ );
+
+ const games=(data.games||[])
+ .filter(g=>
+ ["FINAL","OFF"].includes(g.gameState)&&
+ g.homeTeam.score!==undefined&&
+ g.awayTeam.score!==undefined
+ )
+ .sort((a,b)=>
+ new Date(b.gameDate)-new Date(a.gameDate)
+ ).slice(0,10);
+
+ if(games.length===0)
+ throw new Error("Viimeisiä otteluita ei löytynyt.");
+
+ let wins=0,losses=0,otLosses=0;
+ let goalsFor=0,goalsAgainst=0;
+
+ games.forEach(g=>{
+ const isHome=g.homeTeam.abbrev===code;
+ const scored=isHome?g.homeTeam.score:g.awayTeam.score;
+ const conceded=isHome?g.awayTeam.score:g.homeTeam.score;
+
+ goalsFor+=scored;
+ goalsAgainst+=conceded;
+
+ if(scored>conceded)wins++;
+ else if(g.gameOutcome?.lastPeriodType==="OT"||
+         g.gameOutcome?.lastPeriodType==="SO")otLosses++;
+ else losses++;
+ });
+
+ const points=wins*2+otLosses;
+ const percentage=points/(games.length*2);
+
+ return {
+ code,games,wins,losses,otLosses,
+ goalsFor,goalsAgainst,points,percentage,
+ goalAverage:(goalsFor-goalsAgainst)/games.length
+ };
 }
 
-function analyze(){
- const h=getTeam(home.value);
- const a=getTeam(away.value);
- const output=document.getElementById("result");
+function teamName(code){
+ return teams.find(t=>t[0]===code)?.[1]||code;
+}
+
+function renderForm(h,a){
+ function block(t){
+ return `
+ <h3>${teamName(t.code)}</h3>
+ <p>
+ <span class="good">${t.wins} voittoa</span> /
+ <span class="bad">${t.losses} tappiota</span> /
+ <span class="neutral">${t.otLosses} jatkoaikatappiota</span>
+ </p>
+ <div class="stat">
+ <span>Pisteprosentti</span><b>${(t.percentage*100).toFixed(1)} %</b>
+ </div>
+ <div class="stat">
+ <span>Tehdyt maalit</span><b>${t.goalsFor}</b>
+ </div>
+ <div class="stat">
+ <span>Päästetyt maalit</span><b>${t.goalsAgainst}</b>
+ </div>
+ <div class="stat">
+ <span>Maaliero / ottelu</span>
+ <b>${t.goalAverage.toFixed(2)}</b>
+ </div>
+ <p class="small">Viimeiset ottelut:</p>
+ ${t.games.map(g=>{
+ const isHome=g.homeTeam.abbrev===t.code;
+ const scored=isHome?g.homeTeam.score:g.awayTeam.score;
+ const conceded=isHome?g.awayTeam.score:g.homeTeam.score;
+ const opponent=isHome?g.awayTeam.abbrev:g.homeTeam.abbrev;
+ return `<div class="game">
+ ${g.gameDate} – ${opponent}
+ <b style="float:right">${scored}-${conceded}</b>
+ <span class="${scored>conceded?'good':'bad'}">
+ ${scored>conceded?'VOITTO':'TAPPIO'}
+ </span>
+ </div>`;
+ }).join("")}
+ `;
+ }
+
+ document.getElementById("form").innerHTML=
+ block(h)+"<hr>"+block(a);
+}
+
+async function analyze(){
+ const button=document.getElementById("analyze");
+ const result=document.getElementById("result");
  const details=document.getElementById("details");
 
  if(home.value===away.value){
- output.innerHTML="<p class='red'>Valitse kaksi eri joukkuetta.</p>";
+ result.innerHTML="<p class='bad'>Valitse eri joukkueet.</p>";
  return;
  }
 
- if(!h||!a){
- output.innerHTML="<p class='red'>Joukkueiden tilastot eivät ole saatavilla.</p>";
- return;
- }
+ button.disabled=true;
+ button.textContent="ANALYSOIDAAN...";
+ result.innerHTML="Haetaan viimeisiä otteluita...";
+ details.innerHTML="Haetaan tilastoja NHL:stä...";
+
+ try{
+ await loadStandings();
+
+ const h=getTeam(home.value);
+ const a=getTeam(away.value);
+
+ if(!h||!a)throw new Error("Sarjataulukkoa ei löytynyt.");
+
+ const [hf,af]=await Promise.all([
+ getLast10(home.value),
+ getLast10(away.value)
+ ]);
+
+ renderForm(hf,af);
 
  const hp=h.points/(h.gamesPlayed*2);
  const ap=a.points/(a.gamesPlayed*2);
 
- const hg=(h.goalFor-h.goalAgainst)/h.gamesPlayed;
- const ag=(a.goalFor-a.goalAgainst)/a.gamesPlayed;
+ const hSeason=(h.goalFor-h.goalAgainst)/h.gamesPlayed;
+ const aSeason=(a.goalFor-a.goalAgainst)/a.gamesPlayed;
 
- const hStrength=hp*0.65+hg*0.035+0.025;
- const aStrength=ap*0.65+ag*0.035;
+ // Painotettu malli:
+ // 45 % kauden pisteprosentti
+ // 40 % viimeisten 10 pelin vire
+ // 15 % maaliero
+ // Lisäksi pieni kotietu.
 
- const difference=hStrength-aStrength;
- const homeWin=100/(1+Math.exp(-difference*8));
+ const hStrength=
+ 0.45*hp+
+ 0.40*hf.percentage+
+ 0.15*(0.5+hSeason/10);
+
+ const aStrength=
+ 0.45*ap+
+ 0.40*af.percentage+
+ 0.15*(0.5+aSeason/10);
+
+ const difference=hStrength-aStrength+0.035;
+
+ const homeWin=100/(1+Math.exp(-difference*5));
  const awayWin=100-homeWin;
 
  const winner=homeWin>=awayWin?home.value:away.value;
  const probability=Math.max(homeWin,awayWin);
 
- output.innerHTML=`
- <div class="result">${winner} VOITTAA</div>
+ result.innerHTML=`
+ <div class="result">${teamName(winner)}</div>
  <div class="result">${probability.toFixed(1)} %</div>
- <div class="small" style="text-align:center">Arvioitu voittotodennäköisyys</div>
+ <div class="small" style="text-align:center">
+ Mallin arvioima voittotodennäköisyys
+ </div>
  `;
 
  details.innerHTML=`
- <h3>${h.teamName.default} – ${a.teamName.default}</h3>
- <p>Kotijoukkueen voittotodennäköisyys: <b>${homeWin.toFixed(1)} %</b></p>
+ <h3>${teamName(home.value)} – ${teamName(away.value)}</h3>
+ <p>Kotijoukkue: <b>${homeWin.toFixed(1)} %</b></p>
  <div class="bar"><div class="fill" style="width:${homeWin}%"></div></div>
- <p>Vierasjoukkueen voittotodennäköisyys: <b>${awayWin.toFixed(1)} %</b></p>
+ <p>Vierasjoukkue: <b>${awayWin.toFixed(1)} %</b></p>
  <div class="bar"><div class="fill" style="width:${awayWin}%"></div></div>
  <hr>
- <p><b>Sarjapisteet:</b> ${h.points} – ${a.points}</p>
- <p><b>Pisteprosentti:</b> ${(hp*100).toFixed(1)} % – ${(ap*100).toFixed(1)} %</p>
- <p><b>Maaliero ottelua kohti:</b> ${hg.toFixed(2)} – ${ag.toFixed(2)}</p>
- <p class="small">Ennuste huomioi sarjapisteet, maalieron ja kotiedun.</p>
- <p class="small">Malli ei vielä huomioi maalivahteja, loukkaantumisia, kokoonpanoja, viimeaikaista virettä tai lepoetuja. Ennuste ei ole validoitu vedonlyöntimalli.</p>
+ <h3>Kauden tilastot</h3>
+ <div class="stat"><span>Sarjapisteet</span><b>${h.points} – ${a.points}</b></div>
+ <div class="stat"><span>Pisteprosentti</span><b>${(hp*100).toFixed(1)} % – ${(ap*100).toFixed(1)} %</b></div>
+ <div class="stat"><span>Kauden maaliero / ottelu</span><b>${hSeason.toFixed(2)} – ${aSeason.toFixed(2)}</b></div>
+ <hr>
+ <h3>Virevertailu</h3>
+ <div class="stat"><span>Viimeiset 10 voittoa</span><b>${hf.wins} – ${af.wins}</b></div>
+ <div class="stat"><span>Viimeisten 10 pisteprosentti</span><b>${(hf.percentage*100).toFixed(1)} % – ${(af.percentage*100).toFixed(1)} %</b></div>
+ <div class="stat"><span>Viimeisten 10 maaliero</span><b>${hf.goalAverage.toFixed(2)} – ${af.goalAverage.toFixed(2)}</b></div>
+ <hr>
+ <h3>Analyysin johtopäätös</h3>
+ <p>${teamName(winner)} on tämän mallin suosikki.</p>
+ <p class="small">
+ Arvio perustuu kauden pisteprosenttiin, viimeisten 10 ottelun pisteprosenttiin,
+ maalieroon ja kotietuun. Malli ei vielä huomioi maalivahteja,
+ loukkaantumisia tai vahvistettuja kokoonpanoja.
+ Todennäköisyyksiä ei ole vielä kalibroitu toteutuneilla tuloksilla.
+ </p>
  `;
+
+ }catch(e){
+ result.innerHTML="<p class='bad'>Analyysi epäonnistui.</p>";
+ details.innerHTML="NHL:n ottelutilastoja ei saatu ladattua. Kokeile hetken kuluttua uudelleen.";
+ document.getElementById("form").innerHTML="Viimeisten otteluiden tietoja ei saatu.";
+ console.error(e);
+ }finally{
+ button.disabled=false;
+ button.textContent="ANALYSOI OTTELU";
+ }
 }
 
 async function loadGames(){
  const box=document.getElementById("games");
- box.innerHTML="Ladataan...";
+ box.innerHTML="Ladataan otteluita...";
  try{
  const data=await getData(API+"/score/now");
- if(!data.games||data.games.length===0){
- box.innerHTML="Tällä hetkellä ei ole otteluita.";
+ if(!data.games?.length){
+ box.innerHTML="Tänään ei ole otteluita tai niitä ei ole vielä julkaistu.";
  return;
  }
  box.innerHTML=data.games.map(g=>{
  const h=g.homeTeam;
  const a=g.awayTeam;
- const state=g.gameState||"";
- const score=state==="FUT"?"vs":
- `${a.score} – ${h.score}`;
- return `
- <div class="game">
+ const score=g.gameState==="FUT"?"vs":`${a.score} – ${h.score}`;
+ return `<div class="game">
  <b>${a.abbrev} ${score} ${h.abbrev}</b>
- <div class="small">${g.gameDate} | ${state}</div>
+ <div class="small">${g.gameDate} | ${g.gameState}</div>
  </div>`;
  }).join("");
  }catch(e){
- box.innerHTML="Ottelutietoja ei saatu ladattua.";
+ box.innerHTML="Otteluita ei saatu ladattua.";
  }
 }
 
@@ -219,4 +369,3 @@ loadGames();
 </script>
 </body>
 </html>
-
