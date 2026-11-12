@@ -182,7 +182,21 @@ if(["daytoday","questionable","doubtful","gametime","gtd"].includes(s))return "d
 return "other";
 }
 
-function getDate(g){return g.gameDate||g.date||""}
+function getDate(g){
+if(g.startTimeUTC){
+const parts=new Intl.DateTimeFormat("en-CA",{
+timeZone:"Europe/Helsinki",
+year:"numeric",
+month:"2-digit",
+day:"2-digit"
+}).formatToParts(new Date(g.startTimeUTC));
+
+const p={};
+parts.forEach(x=>p[x.type]=x.value);
+return `${p.year}-${p.month}-${p.day}`;
+}
+return g.gameDate||g.date||"";
+}
 
 function completed(g){
 return ["OFF","FINAL","OVER"].includes(
