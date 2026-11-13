@@ -84,6 +84,8 @@ Tietolähteet: NHL:n ottelutilastot ja sarjataulukko sekä ESPN:n julkinen loukk
 const API="https://api-web.nhle.com/v1";
 const PROXY="https://proxy.cors.dev/";
 const ESPN="https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries";
+const SUPABASE_URL="https://mcmmikrstvwdaqxjrlxq.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_2BRKtvTAaEiMpQF25s5o1g_efVdNwpy";
 
 const teams=[
 ["ANA","Anaheim Ducks"],["BOS","Boston Bruins"],["BUF","Buffalo Sabres"],
@@ -135,6 +137,32 @@ function matchesTeam(value,code){
 return (aliases[code]||[code]).some(a=>norm(a)===norm(value));
 }
 function setStatus(v){$("status").textContent=v}
+
+async function savePrediction(gameDate,home,away,homeProbability,awayProbability){
+const winner=homeProbability>=awayProbability?name(home):name(away);
+const response=await fetch(SUPABASE_URL+"/rest/v1/predictions",{
+method:"POST",
+headers:{
+"apikey":SUPABASE_PUBLISHABLE_KEY,
+"Authorization":"Bearer "+SUPABASE_PUBLISHABLE_KEY,
+"Content-Type":"application/json",
+"Prefer":"return=minimal"
+},
+body:JSON.stringify({
+game_date:gameDate,
+home_team:name(home),
+away_team:name(away),
+home_win_probability:Number(homeProbability.toFixed(2)),
+away_win_probability:Number(awayProbability.toFixed(2)),
+predicted_winner:winner
+})
+});
+if(!response.ok){
+const detail=await response.text();
+throw Error("Tietokantatallennus epäonnistui ("+response.status+"): "+detail.slice(0,180));
+}
+return winner;
+}
 
 async function fetchNHL(path){
 const r=await fetch(PROXY+API+path,{credentials:"omit"});
@@ -531,9 +559,17 @@ ${teamPanel(a,sa,ta,injuries,injuryResult.ok,targetDate)}
 ${teamPanel(b,sb,tb,injuries,injuryResult.ok,targetDate)}
 </div>`;
 
-setStatus(injuryResult.ok?
+let saveMessage="";
+try{
+const savedWinner=await savePrediction(targetDate,a,b,p.a,p.b);
+saveMessage=" Ennuste tallennettu tietokantaan (arvioitu voittaja: "+savedWinner+").";
+}catch(saveError){
+console.error(saveError);
+saveMessage=" Ennustetta ei saatu tallennettua tietokantaan: "+saveError.message;
+}
+setStatus((injuryResult.ok?
 "Analyysi valmis ottelupäivälle "+targetDate+". Tarkista myös mahdolliset puutteet poissaoloraportissa.":
-"Analyysi valmis, mutta ESPN:n poissaolotietoja ei saatu.");
+"Analyysi valmis, mutta ESPN:n poissaolotietoja ei saatu.")+saveMessage);
 }catch(e){
 console.error(e);
 setStatus("Tietojen haku epäonnistui: "+e.message+". Yritä hetken päästä uudelleen.");
