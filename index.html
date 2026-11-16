@@ -99,7 +99,7 @@ td,th{padding:7px 3px}
 </div>
 
 <div class="panel note">
-Tietolähteet: NHL:n ottelutilastot ja sarjataulukko, ESPN:n loukkaantumisraportti, MoneyPuckin ottelukohtaiset xG/Corsi-tilastot sekä Daily Faceoffin kokoonpano- ja maalivahtitiedot. MoneyPuck-data: ei-kaupallinen käyttö, lähde mainitaan. Ennuste on tilastollinen arvio; puuttuvia tietoja ei arvata.
+Tietolähteet: NHL:n ottelutilastot ja sarjataulukko, ESPN:n loukkaantumisraportti, MoneyPuckin ottelukohtaiset xG/Corsi-tilastot sekä Daily Faceoffin kokoonpano- ja maalivahtitiedot Between the Lines -koosteen kautta. MoneyPuck-data: ei-kaupallinen käyttö, lähde mainitaan. Ennuste on tilastollinen arvio; puuttuvia tietoja ei arvata.
 </div>
 </div>
 
@@ -286,11 +286,19 @@ const code=({ "S.J":"SJS","T.B":"TBL","N.J":"NJD","L.A":"LAK"}[m[2]]||m[2]);
 goalies[code]={name:m[1].trim(),status:m[3].trim(),gaa:Number(m[4]),svPct:Number(m[5]),updated:updated[1]+" UTC"};
 }
 const injuries=[];
+const lineups={};
 const teamSections=block.split(/^### /m).slice(1);
 for(const section of teamSections){
 const heading=section.split(/\r?\n/)[0].trim();
 const team=teams.find(t=>t[1].toLowerCase()===heading.toLowerCase());
 if(!team)continue;
+const forwardPart=section.split("Forward lines:")[1]?.split("Defense pairs:")[0]||"";
+const defensePart=section.split("Defense pairs:")[1]?.split("Power play 1:")[0]||"";
+const forwards=forwardPart.split(/\r?\n/).map(x=>x.trim()).filter(x=>/^\d+\./.test(x));
+const defense=defensePart.split(/\r?\n/).map(x=>x.trim()).filter(x=>/^\d+\./.test(x));
+const pp1=section.match(/^Power play 1:\s*(.+)$/m)?.[1]?.trim()||"";
+const pp2=section.match(/^Power play 2:\s*(.+)$/m)?.[1]?.trim()||"";
+lineups[team[0]]={forwards,defense,pp1,pp2};
 const injuryPart=section.split(/^Injuries:\s*$/m)[1]?.split(/^Team page:/m)[0]||"";
 for(const line of injuryPart.split(/\r?\n/)){
 const m=line.match(/^[-*]\s+(.+?)\s+\(([A-Z]+),\s*([^,()]+)(?:,\s*(.*?))?\)\s*$/);
@@ -298,7 +306,7 @@ if(!m)continue;
 injuries.push({name:m[1].trim(),team:team[0],position:m[2],status:m[3].trim(),detail:m[4]||"Daily Faceoff -raportti",returnDate:"",source:"Daily Faceoff"});
 }
 }
-return {goalies,injuries,updated:updated[1]+" UTC"};
+return {goalies,injuries,lineups,updated:updated[1]+" UTC"};
 }
 
 async function fetchLineupData(targetDate,home,away,homeSchedule){
@@ -316,6 +324,14 @@ return parseLineupFeed(await r.text(),home,away);
 function goalieRating(g){
 if(!g||g.status.toLowerCase()!=="confirmed"||!Number.isFinite(g.svPct)||!Number.isFinite(g.gaa))return null;
 return Math.max(-4,Math.min(4,(g.svPct-0.900)*80+(3.0-g.gaa)));
+}
+
+function lineupHTML(data){
+if(!data)return '<p class="muted">Tämän ottelun ketjutietoja ei saatu tai niitä ei ole vielä julkaistu.</p>';
+const group=(title,items)=>items?.length?`<div class="section"><b>${title}</b><div class="small">${items.map(x=>esc(x)).join("<br>")}</div></div>`:"";
+return group("Hyökkäysketjut",data.forwards)+group("Puolustusparit",data.defense)+
+(data.pp1?`<div class="section"><b>Ylivoima 1</b><div class="small">${esc(data.pp1)}</div></div>`:"")+
+(data.pp2?`<div class="section"><b>Ylivoima 2</b><div class="small">${esc(data.pp2)}</div></div>`:"");
 }
 
 function moneyPuckHTML(data){
@@ -569,7 +585,7 @@ function accordion(title,content,extraClass=""){
 return `<details class="accordion ${extraClass}"><summary>${esc(title)}</summary><div class="accordion-content">${content}</div></details>`;
 }
 
-function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate,moneyPuck,goalies){
+function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate,moneyPuck,goalies,lineups){
 const games=recentGames(schedule,code,targetDate);
 const s=summary(games.slice(0,10));
 const f=fatigue(schedule,code,targetDate);
@@ -592,7 +608,7 @@ let goalieHTML;
 if(goalie){
 const confirmed=goalie.status.toLowerCase()==="confirmed";
 const note=confirmed?'<p class="small good">Aloittaja vahvistettu. Maalivahtitieto huomioidaan ennusteessa vain, jos molempien joukkueiden aloittajat on vahvistettu.</p>':'<p class="small warn">Aloittaja ei ole vahvistettu, joten maalivahtia ei painoteta voittoprosentissa.</p>';
-goalieHTML=`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${confirmed?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff · päivitetty ${esc(goalie.updated)}</div></div>${note}`;
+goalieHTML=`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${confirmed?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff / Between the Lines · päivitetty ${esc(goalie.updated)}</div></div>${note}`;
 }else{
 goalieHTML='<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu tai tämän ottelupäivän tietoa ei löytynyt. Sovellus ei arvaa maalivahtia.</p>';
 }
@@ -603,6 +619,7 @@ return `
 ${accordion("Sarjasijoitus",standingsHTML(standing))}
 ${accordion("Viimeaikainen vire",formHTML)}
 ${accordion("MoneyPuck: xG ja laukaisuhallinta",moneyPuckHTML(moneyPuck))}
+${accordion("Ketjut ja ylivoima",lineupHTML(lineups?.[code]))}
 ${accordion("Ottelurasitus ja lepopäivät",fatigueHTML(f))}
 ${accordion("Viimeiset viisi ottelua",recentHTML)}
 ${accordion("Loukkaantumiset ja poissaolot",injuriesHTML(injuries,code,injuryOK))}
@@ -792,6 +809,7 @@ const injuryOK=injuryResult.ok||dfoInjuries.length>0;
 const moneyA=mpResultA.ok?mpResultA.data:null;
 const moneyB=mpResultB.ok?mpResultB.data:null;
 const goalies=lineupData?.goalies||{};
+const lineups=lineupData?.lineups||{};
 const goalieScoreA=goalieRating(goalies[a]);
 const goalieScoreB=goalieRating(goalies[b]);
 const ta=getStanding(table,a),tb=getStanding(table,b);
@@ -834,8 +852,8 @@ ${ia!==null&&ib!==null?
 </div>
 
 <div>
-${teamPanel(a,sa,ta,injuries,injuryOK,targetDate,moneyA,goalies)}
-${teamPanel(b,sb,tb,injuries,injuryOK,targetDate,moneyB,goalies)}
+${teamPanel(a,sa,ta,injuries,injuryOK,targetDate,moneyA,goalies,lineups)}
+${teamPanel(b,sb,tb,injuries,injuryOK,targetDate,moneyB,goalies,lineups)}
 </div>`;
 
 let saveMessage="";
