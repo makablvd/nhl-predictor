@@ -7,8 +7,10 @@
 <title>NHL Predictor</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#091321;color:#edf3fa;font-family:Arial,sans-serif;padding:12px}
-.wrap{max-width:850px;margin:auto}
+body{margin:0;background:#07111f;color:#edf3fa;font-family:Arial,sans-serif;padding:12px;position:relative;isolation:isolate;min-height:100vh}
+body:before{content:"";position:fixed;z-index:-1;pointer-events:none;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1120px,94vw);height:min(720px,78vh);border:3px solid rgba(190,215,239,.12);border-radius:48%;background:linear-gradient(90deg,transparent 32.8%,rgba(65,145,220,.10) 33%,rgba(65,145,220,.10) 33.3%,transparent 33.5%,transparent 49.7%,rgba(240,85,85,.13) 50%,rgba(240,85,85,.13) 50.3%,transparent 50.5%,transparent 66.5%,rgba(65,145,220,.10) 66.7%,rgba(65,145,220,.10) 67%,transparent 67.2%),radial-gradient(ellipse at center,rgba(14,35,58,.28),rgba(4,12,23,.04) 68%);box-shadow:inset 0 0 0 2px rgba(190,215,239,.035),0 0 100px rgba(0,0,0,.22)}
+body:after{content:"";position:fixed;z-index:-1;pointer-events:none;inset:0;background:radial-gradient(ellipse at 50% 15%,rgba(25,75,116,.16),transparent 55%),linear-gradient(180deg,rgba(4,10,19,.52),rgba(4,10,19,.82))}
+.wrap{max-width:850px;margin:auto;position:relative}
 h1{font-size:25px;margin:8px 0}
 h2{font-size:18px;margin:0 0 12px}
 h3{font-size:15px;margin:18px 0 9px;color:#dbeafe}
@@ -36,6 +38,16 @@ th{color:#9aabc0;font-weight:normal}
 .tag.day{background:#713f12;color:#fde68a}
 .note{font-size:12px;line-height:1.5;color:#9aabc0}
 .section{border-top:1px solid #30445e;margin-top:15px;padding-top:12px}
+.accordion{background:rgba(16,31,50,.88);border:1px solid rgba(110,145,180,.28);border-radius:11px;margin:9px 0;overflow:hidden;backdrop-filter:blur(5px)}
+.accordion summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;font-weight:700;color:#e7f1fc;font-size:14px}
+.accordion summary::-webkit-details-marker{display:none}
+.accordion summary:after{content:"";width:9px;height:9px;border-right:2px solid #8fb4d8;border-bottom:2px solid #8fb4d8;transform:rotate(45deg);transition:transform .18s ease;flex:0 0 auto;margin-right:3px;margin-top:-5px}
+.accordion[open] summary:after{transform:rotate(225deg);margin-top:5px}
+.accordion[open] summary{border-bottom:1px solid rgba(110,145,180,.24);background:rgba(31,54,79,.55)}
+.accordion-content{padding:13px;animation:reveal .18s ease-out}
+.team-accordion{background:rgba(13,28,46,.92);border-color:rgba(115,155,194,.36)}
+.team-accordion>summary{font-size:16px;padding:16px}
+@keyframes reveal{from{opacity:.5;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:480px){
 body{padding:8px}
 .panel{padding:11px}
@@ -416,6 +428,10 @@ impact+=goalie?2.5:0.7;
 return Math.min(8,impact);
 }
 
+function accordion(title,content,extraClass=""){
+return `<details class="accordion ${extraClass}"><summary>${esc(title)}</summary><div class="accordion-content">${content}</div></details>`;
+}
+
 function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate){
 const games=recentGames(schedule,code,targetDate);
 const s=summary(games.slice(0,10));
@@ -428,35 +444,25 @@ const rows=games.slice(0,5).map(g=>`
 <td class="${g.result==="V"?"good":g.result==="H"?"bad":"warn"}">${g.result}</td>
 </tr>`).join("");
 
-return `
-<div class="panel">
-<h2>${esc(name(code))}</h2>
-<h3>Sarjasijoitus</h3>
-${standingsHTML(standing)}
-<div class="section">
-<h3>Viimeaikainen vire</h3>
+const formHTML=`
 <div class="grid">
 <div class="stat"><div class="small">Viimeiset 10 ottelua ennen valittua päivää</div><div class="value">${s?s.wins+" voittoa":"–"}</div></div>
 <div class="stat"><div class="small">Tehdyt / päästetyt maalit ottelussa</div><div class="value">${s?s.gf.toFixed(1)+" / "+s.ga.toFixed(1):"–"}</div></div>
-</div>
-</div>
-<div class="section">
-<h3>Ottelurasitus</h3>
-${fatigueHTML(f)}
-</div>
-<div class="section">
-<h3>Viimeiset viisi ottelua ennen valittua päivää</h3>
-${rows?`<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Tulos</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:`<p class="muted">Ottelutietoja ei saatavilla.</p>`}
-</div>
-<div class="section">
-<h3>Loukkaantumiset ja poissaolot</h3>
-${injuriesHTML(injuries,code,injuryOK)}
-</div>
-<div class="section">
-<h3>Maalivahti</h3>
-<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu. Sovellus ei arvaa maalivahtia.</p>
-</div>
 </div>`;
+const recentHTML=rows?`<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Tulos</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:`<p class="muted">Ottelutietoja ei saatavilla.</p>`;
+const goalieHTML=`<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu. Sovellus ei arvaa maalivahtia.</p>`;
+return `
+<details class="accordion team-accordion">
+<summary>${esc(name(code))}<span class="small">Avaa joukkueanalyysi</span></summary>
+<div class="accordion-content">
+${accordion("Sarjasijoitus",standingsHTML(standing))}
+${accordion("Viimeaikainen vire",formHTML)}
+${accordion("Ottelurasitus ja lepopäivät",fatigueHTML(f))}
+${accordion("Viimeiset viisi ottelua",recentHTML)}
+${accordion("Loukkaantumiset ja poissaolot",injuriesHTML(injuries,code,injuryOK))}
+${accordion("Maalivahtitiedot",goalieHTML)}
+</div>
+</details>`;
 }
 
 function prediction(statsA,statsB,standA,standB,fatA,fatB,injuryA,injuryB){
@@ -572,15 +578,15 @@ const m=metric(period.rows);
 return `<div class="stat"><div class="small">${period.label}</div><div class="prob">${m.pct===null?"–":m.pct.toFixed(1)+" %"}</div><div class="small">${m.w} oikein / ${m.n} ratkaistua ottelua</div></div>`;
 }).join("")}</div>
 <p class="note">Laskenta perustuu vain otteluihin, joiden lopputulos löytyi NHL:n tulosrajapinnasta. Tasapeliä ei odoteta NHL-ottelun lopputulokseksi. Tietokannasta löytyi ${predictions.length} ennustetta; ${evaluated.length} saatiin arvioitua. ${missing?missing+" ennusteen tietojen haku epäonnistui.":""}</p>
-<div class="section"><h3>Joukkuekohtainen osumatarkkuus</h3>
- <p class="small">Näyttää, kuinka usein ennuste osui otteluissa, joissa kyseinen joukkue pelasi. Molemmat joukkueet saavat samasta ottelusta saman osumatuloksen.</p>
- <table><thead><tr><th>Joukkue</th><th>Otteluita</th><th>Oikein</th><th>Osumatarkkuus</th></tr></thead><tbody>
- ${teamRows.map(t=>`<tr><td>${esc(t.team)}</td><td>${t.games}</td><td>${t.correct}</td><td class="${t.pct>=60?"good":t.pct<40?"bad":""}">${t.pct.toFixed(1)} %</td></tr>`).join("")}
- </tbody></table></div>
- <div class="section"><h3>Viimeisimmät ratkaistut ennusteet</h3>
+${accordion("Joukkuekohtainen osumatarkkuus",`
+<p class="small">Näyttää, kuinka usein ennuste osui otteluissa, joissa kyseinen joukkue pelasi. Molemmat joukkueet saavat samasta ottelusta saman osumatuloksen.</p>
+<table><thead><tr><th>Joukkue</th><th>Otteluita</th><th>Oikein</th><th>Osumatarkkuus</th></tr></thead><tbody>
+${teamRows.map(t=>`<tr><td>${esc(t.team)}</td><td>${t.games}</td><td>${t.correct}</td><td class="${t.pct>=60?"good":t.pct<40?"bad":""}">${t.pct.toFixed(1)} %</td></tr>`).join("")}
+</tbody></table>`)}
+${accordion("Viimeisimmät ratkaistut ennusteet",`
 <table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Ennuste</th><th>Tulos</th><th></th></tr></thead><tbody>
 ${evaluated.slice(0,12).map(p=>`<tr><td>${esc(p.game_date)}</td><td>${esc(p.home_team)} – ${esc(p.away_team)}</td><td>${esc(p.predicted_winner)}</td><td>${esc(p.actualWinner)}</td><td class="${p.correct?"good":"bad"}">${p.correct?"OSUI":"OHI"}</td></tr>`).join("")}
-</tbody></table></div>`;
+</tbody></table>`)}`;
 $("accuracyStatus").textContent="Osumatarkkuus päivitetty. Mukana vain vahvistetut lopputulokset.";
 }catch(e){
 console.error(e);
@@ -657,7 +663,7 @@ ${ia!==null&&ib!==null?
 <p class="small">${p.reasons.map(esc).join(" · ")} · Kotietu</p>
 </div>
 
-<div class="grid">
+<div>
 ${teamPanel(a,sa,ta,injuries,injuryResult.ok,targetDate)}
 ${teamPanel(b,sb,tb,injuries,injuryResult.ok,targetDate)}
 </div>`;
