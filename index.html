@@ -22,7 +22,7 @@ h3{font-size:15px;margin:18px 0 9px;color:#dbeafe}
 .panel{background:rgba(13,29,48,.72);border:1px solid #293d57;border-radius:13px;padding:14px;margin:12px 0}
 .controls,.grid{display:grid;grid-template-columns:1fr;gap:10px}
 label{display:block;font-size:12px;color:#b6c6d9;margin-bottom:6px}
-select,input[type="date"],button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}select{appearance:none;-webkit-appearance:none;padding-right:42px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.5%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27m6 9 6 6 6-6%27/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+.date-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}.calendar-btn{width:auto;min-width:112px;margin:0;padding:10px 12px;background:#294663;border:1px solid #55718f;font-size:14px;white-space:nowrap}select,input[type="date"],button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}select{appearance:none;-webkit-appearance:none;padding-right:42px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.5%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27m6 9 6 6 6-6%27/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
 button{background:#087f5b;border:0;font-weight:bold;margin-top:12px}
 button:disabled{opacity:.5}
 .stat{background:rgba(27,48,75,.72);border-radius:9px;padding:11px;min-width:0}
@@ -81,7 +81,7 @@ td,th{padding:7px 3px}
 </div>
 <div>
 <label for="gameDate">Ottelupäivä</label>
-<input id="gameDate" type="date" lang="fi-FI" aria-label="Ottelupäivä">
+<div class="date-row"><input id="gameDate" type="date" lang="fi-FI" aria-label="Ottelupäivä"><button type="button" class="calendar-btn" onclick="openDatePicker()" aria-label="Avaa kalenteri">▦ Kalenteri</button></div>
 </div>
 </div>
 <button id="analyzeBtn" onclick="analyze()">ANALYSOI OTTELU</button>
@@ -697,6 +697,12 @@ setStatus("Tietojen haku epäonnistui: "+e.message+". Yritä hetken päästä uu
 }finally{
 btn.disabled=false;
 }
+}
+
+function openDatePicker(){
+const field=$("gameDate");
+if(typeof field.showPicker==="function")field.showPicker();
+else{field.focus();field.click();}
 }
 
 function init(){
