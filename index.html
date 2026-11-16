@@ -22,7 +22,7 @@ h3{font-size:15px;margin:18px 0 9px;color:#dbeafe}
 .panel{background:rgba(13,29,48,.72);border:1px solid #293d57;border-radius:13px;padding:14px;margin:12px 0}
 .controls,.grid{display:grid;grid-template-columns:1fr;gap:10px}
 label{display:block;font-size:12px;color:#b6c6d9;margin-bottom:6px}
-select,input[type="date"],button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}
+select,input[type="text"],button{width:100%;padding:13px;border-radius:8px;border:1px solid #405775;background:#1b304b;color:white;font-size:15px}select{appearance:none;-webkit-appearance:none;padding-right:42px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.5%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27m6 9 6 6 6-6%27/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
 button{background:#087f5b;border:0;font-weight:bold;margin-top:12px}
 button:disabled{opacity:.5}
 .stat{background:rgba(27,48,75,.72);border-radius:9px;padding:11px;min-width:0}
@@ -81,7 +81,7 @@ td,th{padding:7px 3px}
 </div>
 <div>
 <label for="gameDate">Ottelupäivä</label>
-<input id="gameDate" type="date">
+<input id="gameDate" type="text" inputmode="numeric" placeholder="pp.kk.vvvv" maxlength="10" aria-label="Ottelupäivä muodossa päivä kuukausi vuosi">
 </div>
 </div>
 <button id="analyzeBtn" onclick="analyze()">ANALYSOI OTTELU</button>
@@ -147,7 +147,16 @@ String(d.getDate()).padStart(2,"0");
 function formatDate(value){
 if(!value)return "–";
 const m=String(value).match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
-return m?Number(m[3])+"."+Number(m[2])+".":String(value);
+return m?String(m[3])+"."+String(m[2])+"."+m[1]:String(value);
+}
+
+function parseFinnishDate(value){
+const m=String(value||"").trim().match(/^(\\d{1,2})[.\\/ -](\\d{1,2})[.\\/ -](\\d{4})$/);
+if(!m)return null;
+const day=Number(m[1]),month=Number(m[2]),year=Number(m[3]);
+const d=new Date(Date.UTC(year,month-1,day));
+if(d.getUTCFullYear()!==year||d.getUTCMonth()!==month-1||d.getUTCDate()!==day)return null;
+return year+"-"+String(month).padStart(2,"0")+"-"+String(day).padStart(2,"0");
 }
 
 function esc(v){
@@ -610,10 +619,10 @@ btn.disabled=false;
 async function analyze(){
 const a=$("teamA").value;
 const b=$("teamB").value;
-const targetDate=$("gameDate").value;
+const targetDate=parseFinnishDate($("gameDate").value);
 
 if(!targetDate){
-setStatus("Valitse ottelupäivä.");
+setStatus("Anna ottelupäivä suomalaisessa muodossa pp.kk.vvvv, esimerkiksi 16.11.2026.");
 return;
 }
 if(a===b){
@@ -704,7 +713,7 @@ $("teamA").innerHTML=options;
 $("teamB").innerHTML=options;
 $("teamA").value="WPG";
 $("teamB").value="NJD";
-$("gameDate").value=today();
+$("gameDate").value=formatDate(today());
 }
 init();
 </script>
