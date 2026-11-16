@@ -99,7 +99,7 @@ td,th{padding:7px 3px}
 </div>
 
 <div class="panel note">
-Tietolähteet: NHL:n ottelutilastot ja sarjataulukko sekä ESPN:n julkinen loukkaantumisraportti. Ennuste on tilastollinen arvio. Puuttuvia tietoja ei arvata.
+Tietolähteet: NHL:n ottelutilastot ja sarjataulukko, ESPN:n loukkaantumisraportti, MoneyPuckin ottelukohtaiset xG/Corsi-tilastot sekä Daily Faceoffin kokoonpano- ja maalivahtitiedot. MoneyPuck-data: ei-kaupallinen käyttö, lähde mainitaan. Ennuste on tilastollinen arvio; puuttuvia tietoja ei arvata.
 </div>
 </div>
 
@@ -200,6 +200,131 @@ async function fetchNHL(path){
 const r=await fetch(PROXY+API+path,{credentials:"omit"});
 if(!r.ok)throw Error("NHL-rajapinta: "+r.status);
 return r.json();
+}
+
+const MONEYPUCK="https://moneypuck.com/moneypuck/playerData/teamGameByGame";
+const LINEUP_FEED="https://www.betweenthelineshockey.com/tonight.md";
+
+function parseCSV(text){
+const rows=[];let row=[],cell="",quoted=false;
+for(let i=0;i<text.length;i++){
+const c=text[i],n=text[i+1];
+if(quoted){
+if(c==='"'&&n==='"'){cell+='"';i++;}
+else if(c==='"')quoted=false;
+else cell+=c;
+}else if(c==='"')quoted=true;
+else if(c===","){row.push(cell);cell="";}
+else if(c==="\\n"){row.push(cell);rows.push(row);row=[];cell="";}
+else if(c!=="\\r")cell+=c;
+}
+if(cell.length||row.length){row.push(cell);rows.push(row);}
+if(!rows.length)return [];
+const headers=rows.shift().map(x=>x.trim().replace(/^\\uFEFF/,""));
+return rows.filter(r=>r.length>1).map(r=>{
+const o={};headers.forEach((h,i)=>o[h]=(r[i]??"").trim());return o;
+});
+}
+
+function mpTeamFile(code){
+return ({LAK:"LAK",NJD:"NJD",SJS:"SJS",TBL:"TBL"}[code]||code)+".csv";
+}
+
+function mpDateCutoff(finnishDate){
+const d=new Date(finnishDate+"T12:00:00Z");
+d.setUTCDate(d.getUTCDate()-1);
+return d.toISOString().slice(0,10);
+}
+
+async function fetchMoneyPuckTeam(code,targetDate){
+const season=Number(targetDate.slice(0,4))-(Number(targetDate.slice(5,7))<7?1:0);
+const url=MONEYPUCK+"/"+season+"/regular/"+mpTeamFile(code);
+const r=await fetch(PROXY+url,{credentials:"omit"});
+if(!r.ok)throw Error("MoneyPuck "+code+": "+r.status);
+const rows=parseCSV(await r.text());
+if(!rows.length)throw Error("MoneyPuckin CSV oli tyhjä");
+const cutoff=mpDateCutoff(targetDate);
+const usable=rows.filter(x=>{
+const team=String(x.team||"").toUpperCase();
+const situation=String(x.situation||"all").toLowerCase();
+const date=String(x.gameDate||x.date||"").slice(0,10);
+return (!team||team===code||team===({LAK:"LA",NJD:"NJ",SJS:"S.J",TBL:"T.B"}[code]||code))
+&&situation==="all"&&date&&date<cutoff;
+});
+if(!usable.length)throw Error("MoneyPuckilta ei löytynyt aiempia otteluita");
+const total=(key)=>usable.reduce((sum,x)=>sum+(Number(x[key])||0),0);
+let xgf=total("xGoalsFor"),xga=total("xGoalsAgainst");
+let xgShare=xgf+xga>0?xgf/(xgf+xga):null;
+const average=(keys)=>{
+const key=keys.find(k=>usable.some(x=>x[k]!==undefined&&x[k]!==""));
+if(!key)return null;
+const vals=usable.map(x=>Number(x[key])).filter(Number.isFinite);
+return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+};
+let corsiShare=average(["corsiShare","corsiPercentage","corsiForPercentage"]);
+if(corsiShare!==null&&corsiShare>1)corsiShare/=100;
+if(xgShare===null)xgShare=average(["xGoalsShare","xGoalsPercentage"]);
+if(xgShare!==null&&xgShare>1)xgShare/=100;
+if(xgShare===null&&corsiShare===null)throw Error("MoneyPuckin xG/Corsi-sarakkeita ei löytynyt");
+return {xgShare,corsiShare,games:usable.length,sourceDate:usable.map(x=>x.gameDate||"").sort().at(-1)||""};
+}
+
+function parseLineupFeed(markdown,home,away){
+const updated=markdown.match(/(?:Lineups and injuries updated|Starting goalies updated):\\s*(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) UTC/i);
+if(!updated)return null;
+const stamp=new Date(updated[1].replace(" ","T")+"Z");
+if(!Number.isFinite(stamp.getTime())||Date.now()-stamp.getTime()>18*60*60*1000)return null;
+const blocks=markdown.split(/^## /m).slice(1);
+const block=blocks.find(b=>{
+const goalieCodes=[...b.matchAll(/^[-*]\\s+.+?\\(([A-Z.]+)\\),\\s*[^,\\r\\n]+,/gm)].map(m=>m[1]);
+return goalieCodes.includes(home)&&goalieCodes.includes(away);
+});
+if(!block)return null;
+const goalies={};
+for(const m of block.matchAll(/^[-*]\\s+(.+?)\\s+\\(([A-Z.]+)\\),\\s*([^,\\r\\n]+),.*?([0-9]+(?:\\.[0-9]+)?)\\s+GAA,\\s*([0-9]+(?:\\.[0-9]+)?)\\s+SV%/gm)){
+const code=({ "S.J":"SJS","T.B":"TBL","N.J":"NJD","L.A":"LAK"}[m[2]]||m[2]);
+goalies[code]={name:m[1].trim(),status:m[3].trim(),gaa:Number(m[4]),svPct:Number(m[5]),updated:updated[1]+" UTC"};
+}
+const injuries=[];
+const teamSections=block.split(/^### /m).slice(1);
+for(const section of teamSections){
+const heading=section.split(/\\r?\\n/)[0].trim();
+const team=teams.find(t=>t[1].toLowerCase()===heading.toLowerCase());
+if(!team)continue;
+const injuryPart=section.split(/^Injuries:\s*$/m)[1]?.split(/^Team page:/m)[0]||"";
+for(const line of injuryPart.split(/\\r?\\n/)){
+const m=line.match(/^[-*]\\s+(.+?)\\s+\\(([A-Z]+),\\s*([^,()]+)(?:,\\s*(.*?))?\\)\\s*$/);
+if(!m)continue;
+injuries.push({name:m[1].trim(),team:team[0],position:m[2],status:m[3].trim(),detail:m[4]||"Daily Faceoff -raportti",returnDate:"",source:"Daily Faceoff"});
+}
+}
+return {goalies,injuries,updated:updated[1]+" UTC"};
+}
+
+async function fetchLineupData(targetDate,home,away,homeSchedule){
+if(targetDate!==today())return null;
+const matchup=(homeSchedule?.games||[]).some(g=>{
+const h=g.homeTeam?.abbrev,a=g.awayTeam?.abbrev;
+return getDate(g)===targetDate&&((h===home&&a===away)||(h===away&&a===home));
+});
+if(!matchup)return null;
+const r=await fetch(PROXY+LINEUP_FEED,{credentials:"omit"});
+if(!r.ok)throw Error("Daily Faceoff -kokoonpanolähde: "+r.status);
+return parseLineupFeed(await r.text(),home,away);
+}
+
+function goalieRating(g){
+if(!g||g.status.toLowerCase()!=="confirmed"||!Number.isFinite(g.svPct)||!Number.isFinite(g.gaa))return null;
+return Math.max(-4,Math.min(4,(g.svPct-0.900)*80+(3.0-g.gaa)));
+}
+
+function moneyPuckHTML(data){
+if(!data)return '<p class="muted">MoneyPuckin ottelukohtaisia tilastoja ei saatu. Niitä ei huomioitu ennusteessa.</p>';
+return `<div class="grid">
+<div class="stat"><div class="small">Odotettujen maalien osuus (xG%)</div><div class="value">${data.xgShare===null?"–":(data.xgShare*100).toFixed(1)+" %"}</div></div>
+<div class="stat"><div class="small">Laukaisuhallinta (Corsi%)</div><div class="value">${data.corsiShare===null?"–":(data.corsiShare*100).toFixed(1)+" %"}</div></div>
+<div class="stat"><div class="small">Mukana olevat aiemmat ottelut</div><div class="value">${data.games}</div></div>
+</div><p class="small">MoneyPuck · data rajattu ennen valittua ottelupäivää.</p>`;
 }
 
 function parseInjuries(data){
@@ -444,7 +569,7 @@ function accordion(title,content,extraClass=""){
 return `<details class="accordion ${extraClass}"><summary>${esc(title)}</summary><div class="accordion-content">${content}</div></details>`;
 }
 
-function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate){
+function teamPanel(code,schedule,standing,injuries,injuryOK,targetDate,moneyPuck,goalies){
 const games=recentGames(schedule,code,targetDate);
 const s=summary(games.slice(0,10));
 const f=fatigue(schedule,code,targetDate);
@@ -462,13 +587,15 @@ const formHTML=`
 <div class="stat"><div class="small">Tehdyt / päästetyt maalit ottelussa</div><div class="value">${s?s.gf.toFixed(1)+" / "+s.ga.toFixed(1):"–"}</div></div>
 </div>`;
 const recentHTML=rows?`<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Tulos</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:`<p class="muted">Ottelutietoja ei saatavilla.</p>`;
-const goalieHTML=`<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu. Sovellus ei arvaa maalivahtia.</p>`;
+const goalie=goalies?.[code];
+const goalieHTML=goalie?`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${goalie.status.toLowerCase()==="confirmed"?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff · päivitetty ${esc(goalie.updated)}</div></div>${goalie.status.toLowerCase()==="confirmed"?'<p class="small good">Aloittaja vahvistettu. Maalivahtitieto huomioidaan ennusteessa vain, jos molempien joukkueiden aloittajat on vahvistettu.</p>':'<p class="small warn">Aloittaja ei ole vahvistettu, joten maalivahtia ei painoteta voittoprosentissa.</p>'}:'<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu tai tämän ottelupäivän tietoa ei löytynyt. Sovellus ei arvaa maalivahtia.</p>';
 return `
 <details class="accordion team-accordion">
 <summary>${esc(name(code))}<span class="small">Avaa joukkueanalyysi</span></summary>
 <div class="accordion-content">
 ${accordion("Sarjasijoitus",standingsHTML(standing))}
 ${accordion("Viimeaikainen vire",formHTML)}
+${accordion("MoneyPuck: xG ja laukaisuhallinta",moneyPuckHTML(moneyPuck))}
 ${accordion("Ottelurasitus ja lepopäivät",fatigueHTML(f))}
 ${accordion("Viimeiset viisi ottelua",recentHTML)}
 ${accordion("Loukkaantumiset ja poissaolot",injuriesHTML(injuries,code,injuryOK))}
@@ -477,7 +604,7 @@ ${accordion("Maalivahtitiedot",goalieHTML)}
 </details>`;
 }
 
-function prediction(statsA,statsB,standA,standB,fatA,fatB,injuryA,injuryB){
+function prediction(statsA,statsB,standA,standB,fatA,fatB,injuryA,injuryB,mpA,mpB,goalieA,goalieB){
 let score=0;
 const reasons=[];
 
@@ -506,6 +633,16 @@ reasons.push("Ottelurasitus ja lepopäivät");
 if(injuryA!==null&&injuryB!==null){
 score+=injuryB-injuryA;
 reasons.push("Loukkaantumiset ja poissaolot");
+}
+
+if(mpA&&mpB){
+if(mpA.xgShare!==null&&mpB.xgShare!==null)score+=(mpA.xgShare-mpB.xgShare)*35;
+if(mpA.corsiShare!==null&&mpB.corsiShare!==null)score+=(mpA.corsiShare-mpB.corsiShare)*12;
+reasons.push("MoneyPuckin odotettujen maalien ja laukaisuhallinnan tilastot");
+}
+if(goalieA!==null&&goalieB!==null){
+score+=goalieA-goalieB;
+reasons.push("Vahvistettujen aloitusmaalivahtien tilastot");
 }
 
 score+=3;
@@ -628,14 +765,28 @@ $("output").innerHTML="";
 setStatus("Haetaan otteluita, sarjataulukkoa ja poissaoloja...");
 
 try{
-const [sa,sb,table,injuryResult]=await Promise.all([
+const [sa,sb,table,injuryResult,mpResultA,mpResultB]=await Promise.all([
 fetchNHL(`/club-schedule-season/${a}/now`),
 fetchNHL(`/club-schedule-season/${b}/now`),
 fetchNHL("/standings/now"),
-fetchInjuries().then(data=>({ok:true,data})).catch(error=>({ok:false,error}))
+fetchInjuries().then(data=>({ok:true,data})).catch(error=>({ok:false,error})),
+fetchMoneyPuckTeam(a,targetDate).then(data=>({ok:true,data})).catch(error=>({ok:false,error})),
+fetchMoneyPuckTeam(b,targetDate).then(data=>({ok:true,data})).catch(error=>({ok:false,error}))
 ]);
 
-const injuries=injuryResult.ok?injuryResult.data:[];
+let lineupData=null;
+try{lineupData=await fetchLineupData(targetDate,a,b,sa);}catch(error){console.warn("Daily Faceoff -kokoonpanot eivät latautuneet:",error);}
+const dfoInjuries=lineupData?.injuries||[];
+const injuries=[...(injuryResult.ok?injuryResult.data:[])];
+for(const item of dfoInjuries){
+if(!injuries.some(x=>x.team===item.team&&norm(x.name)===norm(item.name)))injuries.push(item);
+}
+const injuryOK=injuryResult.ok||dfoInjuries.length>0;
+const moneyA=mpResultA.ok?mpResultA.data:null;
+const moneyB=mpResultB.ok?mpResultB.data:null;
+const goalies=lineupData?.goalies||{};
+const goalieScoreA=goalieRating(goalies[a]);
+const goalieScoreB=goalieRating(goalies[b]);
 const ta=getStanding(table,a),tb=getStanding(table,b);
 
 // Kaikki otteluhistoria rajataan valittuun ottelupäivään.
@@ -646,10 +797,10 @@ const stb=summary(gb.slice(0,10));
 const fa=fatigue(sa,a,targetDate);
 const fb=fatigue(sb,b,targetDate);
 
-const ia=injuryImpact(injuries,a,injuryResult.ok);
-const ib=injuryImpact(injuries,b,injuryResult.ok);
+const ia=injuryImpact(injuries,a,injuryOK);
+const ib=injuryImpact(injuries,b,injuryOK);
 
-const p=prediction(sta,stb,ta,tb,fa,fb,ia,ib);
+const p=prediction(sta,stb,ta,tb,fa,fb,ia,ib,moneyA,moneyB,goalieScoreA,goalieScoreB);
 
 $("output").innerHTML=`
 <div class="panel">
@@ -667,7 +818,7 @@ $("output").innerHTML=`
 <div class="bar"><span style="width:${p.b}%"></span></div>
 </div>
 </div>
-<p class="note">Arvio huomioi viimeaikaisen vireen, sarjasijoituksen, lepopäivät, otteluruuhkan ja raportoidut poissaolot. Poissaolojen painotus on alustava: maalivahdin poissaolo vaikuttaa enemmän. Kotietu on mukana. Aloittavaa maalivahtia ei arvata.</p>
+<p class="note">Arvio huomioi viimeaikaisen vireen, sarjasijoituksen, MoneyPuckin xG- ja Corsi-tilastot, lepopäivät, otteluruuhkan ja raportoidut poissaolot. Vahvistetut aloitusmaalivahdit vaikuttavat arvioon; vahvistamattomia ei arvata. Kotietu on mukana.</p>
 ${ia!==null&&ib!==null?
 `<p class="small">Poissaolojen arvioitu vaikutus: ${esc(name(a))} −${ia.toFixed(1)} · ${esc(name(b))} −${ib.toFixed(1)} prosenttiyksikköä.</p>`:
 `<p class="small warn">Poissaolotietoja ei saatu, joten niitä ei huomioitu voittoprosentissa.</p>`}
@@ -676,8 +827,8 @@ ${ia!==null&&ib!==null?
 </div>
 
 <div>
-${teamPanel(a,sa,ta,injuries,injuryResult.ok,targetDate)}
-${teamPanel(b,sb,tb,injuries,injuryResult.ok,targetDate)}
+${teamPanel(a,sa,ta,injuries,injuryOK,targetDate,moneyA,goalies)}
+${teamPanel(b,sb,tb,injuries,injuryOK,targetDate,moneyB,goalies)}
 </div>`;
 
 let saveMessage="";
