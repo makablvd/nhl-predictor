@@ -215,12 +215,12 @@ else if(c==='"')quoted=false;
 else cell+=c;
 }else if(c==='"')quoted=true;
 else if(c===","){row.push(cell);cell="";}
-else if(c==="\\n"){row.push(cell);rows.push(row);row=[];cell="";}
-else if(c!=="\\r")cell+=c;
+else if(c==="\n"){row.push(cell);rows.push(row);row=[];cell="";}
+else if(c!=="\r")cell+=c;
 }
 if(cell.length||row.length){row.push(cell);rows.push(row);}
 if(!rows.length)return [];
-const headers=rows.shift().map(x=>x.trim().replace(/^\\uFEFF/,""));
+const headers=rows.shift().map(x=>x.trim().replace(/^\uFEFF/,""));
 return rows.filter(r=>r.length>1).map(r=>{
 const o={};headers.forEach((h,i)=>o[h]=(r[i]??"").trim());return o;
 });
@@ -270,30 +270,30 @@ return {xgShare,corsiShare,games:usable.length,sourceDate:usable.map(x=>x.gameDa
 }
 
 function parseLineupFeed(markdown,home,away){
-const updated=markdown.match(/(?:Lineups and injuries updated|Starting goalies updated):\\s*(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) UTC/i);
+const updated=markdown.match(/(?:Lineups and injuries updated|Starting goalies updated):\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC/i);
 if(!updated)return null;
 const stamp=new Date(updated[1].replace(" ","T")+"Z");
 if(!Number.isFinite(stamp.getTime())||Date.now()-stamp.getTime()>18*60*60*1000)return null;
 const blocks=markdown.split(/^## /m).slice(1);
 const block=blocks.find(b=>{
-const goalieCodes=[...b.matchAll(/^[-*]\\s+.+?\\(([A-Z.]+)\\),\\s*[^,\\r\\n]+,/gm)].map(m=>m[1]);
+const goalieCodes=[...b.matchAll(/^[-*]\s+.+?\(([A-Z.]+)\),\s*[^,\r\n]+,/gm)].map(m=>m[1]);
 return goalieCodes.includes(home)&&goalieCodes.includes(away);
 });
 if(!block)return null;
 const goalies={};
-for(const m of block.matchAll(/^[-*]\\s+(.+?)\\s+\\(([A-Z.]+)\\),\\s*([^,\\r\\n]+),.*?([0-9]+(?:\\.[0-9]+)?)\\s+GAA,\\s*([0-9]+(?:\\.[0-9]+)?)\\s+SV%/gm)){
+for(const m of block.matchAll(/^[-*]\s+(.+?)\s+\(([A-Z.]+)\),\s*([^,\r\n]+),.*?([0-9]+(?:\.[0-9]+)?)\s+GAA,\s*([0-9]+(?:\.[0-9]+)?)\s+SV%/gm)){
 const code=({ "S.J":"SJS","T.B":"TBL","N.J":"NJD","L.A":"LAK"}[m[2]]||m[2]);
 goalies[code]={name:m[1].trim(),status:m[3].trim(),gaa:Number(m[4]),svPct:Number(m[5]),updated:updated[1]+" UTC"};
 }
 const injuries=[];
 const teamSections=block.split(/^### /m).slice(1);
 for(const section of teamSections){
-const heading=section.split(/\\r?\\n/)[0].trim();
+const heading=section.split(/\r?\n/)[0].trim();
 const team=teams.find(t=>t[1].toLowerCase()===heading.toLowerCase());
 if(!team)continue;
 const injuryPart=section.split(/^Injuries:\s*$/m)[1]?.split(/^Team page:/m)[0]||"";
-for(const line of injuryPart.split(/\\r?\\n/)){
-const m=line.match(/^[-*]\\s+(.+?)\\s+\\(([A-Z]+),\\s*([^,()]+)(?:,\\s*(.*?))?\\)\\s*$/);
+for(const line of injuryPart.split(/\r?\n/)){
+const m=line.match(/^[-*]\s+(.+?)\s+\(([A-Z]+),\s*([^,()]+)(?:,\s*(.*?))?\)\s*$/);
 if(!m)continue;
 injuries.push({name:m[1].trim(),team:team[0],position:m[2],status:m[3].trim(),detail:m[4]||"Daily Faceoff -raportti",returnDate:"",source:"Daily Faceoff"});
 }
@@ -839,9 +839,9 @@ saveMessage=" Ennuste tallennettu tietokantaan (arvioitu voittaja: "+savedWinner
 console.error(saveError);
 saveMessage=" Ennustetta ei saatu tallennettua tietokantaan: "+saveError.message;
 }
-setStatus((injuryResult.ok?
+setStatus((injuryOK?
 "Analyysi valmis ottelupäivälle "+formatDate(targetDate)+". Tarkista myös mahdolliset puutteet poissaoloraportissa.":
-"Analyysi valmis ottelupäivälle "+formatDate(targetDate)+", mutta ESPN:n poissaolotietoja ei saatu.")+saveMessage);
+"Analyysi valmis ottelupäivälle "+formatDate(targetDate)+", mutta poissaolotietoja ei saatu.")+saveMessage);
 }catch(e){
 console.error(e);
 setStatus("Tietojen haku epäonnistui: "+e.message+". Yritä hetken päästä uudelleen.");
