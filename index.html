@@ -588,7 +588,14 @@ const formHTML=`
 </div>`;
 const recentHTML=rows?`<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Tulos</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:`<p class="muted">Ottelutietoja ei saatavilla.</p>`;
 const goalie=goalies?.[code];
-const goalieHTML=goalie?`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${goalie.status.toLowerCase()==="confirmed"?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff · päivitetty ${esc(goalie.updated)}</div></div>${goalie.status.toLowerCase()==="confirmed"?'<p class="small good">Aloittaja vahvistettu. Maalivahtitieto huomioidaan ennusteessa vain, jos molempien joukkueiden aloittajat on vahvistettu.</p>':'<p class="small warn">Aloittaja ei ole vahvistettu, joten maalivahtia ei painoteta voittoprosentissa.</p>'}:'<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu tai tämän ottelupäivän tietoa ei löytynyt. Sovellus ei arvaa maalivahtia.</p>';
+let goalieHTML;
+if(goalie){
+const confirmed=goalie.status.toLowerCase()==="confirmed";
+const note=confirmed?'<p class="small good">Aloittaja vahvistettu. Maalivahtitieto huomioidaan ennusteessa vain, jos molempien joukkueiden aloittajat on vahvistettu.</p>':'<p class="small warn">Aloittaja ei ole vahvistettu, joten maalivahtia ei painoteta voittoprosentissa.</p>';
+goalieHTML=`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${confirmed?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff · päivitetty ${esc(goalie.updated)}</div></div>${note}`;
+}else{
+goalieHTML='<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu tai tämän ottelupäivän tietoa ei löytynyt. Sovellus ei arvaa maalivahtia.</p>';
+}
 return `
 <details class="accordion team-accordion">
 <summary>${esc(name(code))}<span class="small">Avaa joukkueanalyysi</span></summary>
