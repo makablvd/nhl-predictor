@@ -39,7 +39,7 @@ th{color:#9aabc0;font-weight:normal}
 .injury{padding:10px 0;border-bottom:1px solid #30445e}
 .tag{display:inline-block;padding:3px 7px;border-radius:5px;background:#334155;font-size:11px}
 .tag.out{background:#7f1d1d;color:#fecaca}
-.tag.day{background:#713f12;color:#fde68a}
+.tag.day{background:#713f12;color:#fde68a}.tag.confirmed{background:#14532d;color:#bbf7d0}
 .note{font-size:12px;line-height:1.5;color:#9aabc0}
 .section{border-top:1px solid #30445e;margin-top:15px;padding-top:12px}
 .accordion{background:rgba(16,31,50,.66);border:1px solid rgba(110,145,180,.28);border-radius:11px;margin:9px 0;overflow:hidden;backdrop-filter:blur(5px)}
@@ -608,7 +608,7 @@ let goalieHTML;
 if(goalie){
 const confirmed=goalie.status.toLowerCase()==="confirmed";
 const note=confirmed?'<p class="small good">Aloittaja vahvistettu. Maalivahtitieto huomioidaan ennusteessa vain, jos molempien joukkueiden aloittajat on vahvistettu.</p>':'<p class="small warn">Aloittaja ei ole vahvistettu, joten maalivahtia ei painoteta voittoprosentissa.</p>';
-goalieHTML=`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${confirmed?"out":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff / Between the Lines · päivitetty ${esc(goalie.updated)}</div></div>${note}`;
+goalieHTML=`<div class="stat"><b>${esc(goalie.name)}</b> <span class="tag ${confirmed?"confirmed":"day"}">${esc(goalie.status)}</span><div class="small">GAA ${goalie.gaa.toFixed(2)} · SV% ${(goalie.svPct*100).toFixed(1)} %</div><div class="small">Lähde: Daily Faceoff / Between the Lines · päivitetty ${esc(goalie.updated)}</div></div>${note}`;
 }else{
 goalieHTML='<p class="muted">Aloittavaa maalivahtia ei ole vahvistettu tai tämän ottelupäivän tietoa ei löytynyt. Sovellus ei arvaa maalivahtia.</p>';
 }
