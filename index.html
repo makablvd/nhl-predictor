@@ -5,11 +5,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NHL Predictor</title>
+<meta name="theme-color" content="#07111f">
+<!-- Background update: rink removed; NHL shield only. -->
 <style>
 *{box-sizing:border-box}
 html{background:#07111f}
 body{margin:0;background:transparent;color:#edf3fa;font-family:Arial,sans-serif;padding:12px;position:relative;isolation:isolate;min-height:100vh}
-.nhl-bg{position:fixed;z-index:0;pointer-events:none;inset:0;background-image:url('https://commons.wikimedia.org/wiki/Special:FilePath/National_Hockey_League_shield_%282%29.svg');background-repeat:no-repeat;background-position:center center;background-size:min(58vw,62vh);opacity:.095;filter:grayscale(1)}
+.nhl-bg{position:fixed;z-index:0;pointer-events:none;inset:0;background-image:url('https://upload.wikimedia.org/wikipedia/en/thumb/e/e4/nhl_shield.svg/512px-nhl_shield.svg.png');background-repeat:no-repeat;background-position:center center;background-size:min(52vw,56vh);opacity:.12;filter:grayscale(1)}
 body:after{content:"";position:fixed;z-index:1;pointer-events:none;inset:0;background:linear-gradient(180deg,rgba(4,10,19,.06),rgba(4,10,19,.16))}
 .wrap{max-width:850px;margin:auto;position:relative;z-index:2}
 h1{font-size:25px;margin:8px 0}
