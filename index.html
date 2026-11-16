@@ -73,6 +73,14 @@ td,th{padding:7px 3px}
 
 <div id="output"></div>
 
+<div class="panel">
+<h2>Ennusteiden osumatarkkuus</h2>
+<p class="small">Vertaa tallennettuja ennusteita NHL:n vahvistettuihin lopputuloksiin. Kesken olevia ja tulevia otteluita ei lasketa mukaan.</p>
+<button id="accuracyBtn" onclick="loadAccuracy()">PÄIVITÄ OSUMATARKKUUS</button>
+<div id="accuracyStatus" class="status">Päivitä tulokset nähdäksesi ennusteiden toteutuneen tarkkuuden.</div>
+<div id="accuracyOutput"></div>
+</div>
+
 <div class="panel note">
 Tietolähteet: NHL:n ottelutilastot ja sarjataulukko sekä ESPN:n julkinen loukkaantumisraportti. Ennuste on tilastollinen arvio. Puuttuvia tietoja ei arvata.
 </div>
@@ -485,6 +493,86 @@ reasons.push("Loukkaantumiset ja poissaolot");
 score+=3;
 const a=Math.max(10,Math.min(90,50+score));
 return {a,b:100-a,reasons};
+}
+
+
+function teamCodeFromName(teamName){
+const found=teams.find(t=>t[1]===teamName);
+return found?found[0]:null;
+}
+
+async function fetchFinalResult(date){
+const data=await fetchNHL("/score/"+date);
+const games=Array.isArray(data?.games)?data.games:[];
+return games.filter(completed).map(g=>({
+home: g.homeTeam?.abbrev,
+away: g.awayTeam?.abbrev,
+homeScore: Number(g.homeTeam?.score),
+awayScore: Number(g.awayTeam?.score)
+})).filter(g=>g.home&&g.away&&Number.isFinite(g.homeScore)&&Number.isFinite(g.awayScore));
+}
+
+async function loadAccuracy(){
+const btn=$("accuracyBtn");
+btn.disabled=true;
+$("accuracyStatus").textContent="Haetaan tallennettuja ennusteita ja vahvistettuja ottelutuloksia...";
+$("accuracyOutput").innerHTML="";
+try{
+const response=await fetch(SUPABASE_URL+"/rest/v1/predictions?select=game_date,home_team,away_team,predicted_winner,home_win_probability,away_win_probability&order=game_date.desc&limit=1000",{
+headers:{"apikey":SUPABASE_PUBLISHABLE_KEY,"Authorization":"Bearer "+SUPABASE_PUBLISHABLE_KEY}
+});
+if(!response.ok)throw Error("Tietokantahaku epäonnistui ("+response.status+"): "+(await response.text()).slice(0,160));
+const predictions=await response.json();
+if(!Array.isArray(predictions)||!predictions.length){
+$("accuracyStatus").textContent="Tietokannasta ei löytynyt tallennettuja ennusteita.";
+return;
+}
+const dates=[...new Set(predictions.map(p=>p.game_date).filter(Boolean))];
+const resultsByDate={};
+for(const date of dates){
+try{resultsByDate[date]=await fetchFinalResult(date);}
+catch(e){resultsByDate[date]=null;}
+}
+const todayDate=today();
+const evaluated=[];
+let missing=0;
+for(const p of predictions){
+const games=resultsByDate[p.game_date];
+if(!games){missing++;continue;}
+const home=teamCodeFromName(p.home_team);
+const away=teamCodeFromName(p.away_team);
+if(!home||!away){missing++;continue;}
+const game=games.find(g=>g.home===home&&g.away===away);
+if(!game)continue;
+const actualWinner=game.homeScore>game.awayScore?p.home_team:game.awayScore>game.homeScore?p.away_team:null;
+if(!actualWinner)continue;
+evaluated.push({...p,actualWinner,correct:p.predicted_winner===actualWinner});
+}
+const cutoff7=new Date(todayDate+"T12:00:00");cutoff7.setDate(cutoff7.getDate()-7);
+const cutoff30=new Date(todayDate+"T12:00:00");cutoff30.setDate(cutoff30.getDate()-30);
+const within=(p,cutoff)=>new Date(p.game_date+"T12:00:00")>=cutoff;
+const periods=[
+{label:"Kaikki vahvistetut",rows:evaluated},
+{label:"Viimeiset 30 päivää",rows:evaluated.filter(p=>within(p,cutoff30))},
+{label:"Viimeiset 7 päivää",rows:evaluated.filter(p=>within(p,cutoff7))}
+];
+const metric=rows=>({n:rows.length,w:rows.filter(p=>p.correct).length,pct:rows.length?100*rows.filter(p=>p.correct).length/rows.length:null});
+$("accuracyOutput").innerHTML=`<div class="grid" style="margin-top:12px">${periods.map(period=>{
+const m=metric(period.rows);
+return `<div class="stat"><div class="small">${period.label}</div><div class="prob">${m.pct===null?"–":m.pct.toFixed(1)+" %"}</div><div class="small">${m.w} oikein / ${m.n} ratkaistua ottelua</div></div>`;
+}).join("")}</div>
+<p class="note">Laskenta perustuu vain otteluihin, joiden lopputulos löytyi NHL:n tulosrajapinnasta. Tasapeliä ei odoteta NHL-ottelun lopputulokseksi. Tietokannasta löytyi ${predictions.length} ennustetta; ${evaluated.length} saatiin arvioitua. ${missing?missing+" ennusteen tietojen haku epäonnistui.":""}</p>
+<div class="section"><h3>Viimeisimmät ratkaistut ennusteet</h3>
+<table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Ennuste</th><th>Tulos</th><th></th></tr></thead><tbody>
+${evaluated.slice(0,12).map(p=>`<tr><td>${esc(p.game_date)}</td><td>${esc(p.home_team)} – ${esc(p.away_team)}</td><td>${esc(p.predicted_winner)}</td><td>${esc(p.actualWinner)}</td><td class="${p.correct?"good":"bad"}">${p.correct?"OSUI":"OHI"}</td></tr>`).join("")}
+</tbody></table></div>`;
+$("accuracyStatus").textContent="Osumatarkkuus päivitetty. Mukana vain vahvistetut lopputulokset.";
+}catch(e){
+console.error(e);
+$("accuracyStatus").textContent="Osumatarkkuuden haku epäonnistui: "+e.message;
+}finally{
+btn.disabled=false;
+}
 }
 
 async function analyze(){
