@@ -559,7 +559,7 @@ const kind=injuryKind(i.status);
 const tag=kind==="out"?"out":kind==="day"?"day":"";
 return `<div class="injury">
 <b>${esc(i.name)}</b> <span class="tag ${tag}">${esc(i.status)}</span>
-<div class="small">${esc(i.position||"Pelipaikka ei tiedossa")} · ${esc(i.detail||"Lisätietoa ei ilmoitettu")}${i.returnDate?" · Arvioitu paluu: "+esc(i.returnDate):""}</div>
+<div class="small">${esc(i.position||"Pelipaikka ei tiedossa")} · ${esc(i.detail||"Lisätietoa ei ilmoitettu")}${i.returnDate?" · Arvioitu paluu: "+esc(formatDate(i.returnDate)):""}</div>
 </div>`;
 }).join("");
 }
