@@ -557,12 +557,27 @@ const periods=[
 {label:"Viimeiset 7 päivää",rows:evaluated.filter(p=>within(p,cutoff7))}
 ];
 const metric=rows=>({n:rows.length,w:rows.filter(p=>p.correct).length,pct:rows.length?100*rows.filter(p=>p.correct).length/rows.length:null});
+ const teamStats={};
+ for(const p of evaluated){
+   for(const team of [p.home_team,p.away_team]){
+     if(!teamStats[team])teamStats[team]={games:0,correct:0};
+     teamStats[team].games++;
+     if(p.correct)teamStats[team].correct++;
+   }
+ }
+ const teamRows=Object.entries(teamStats).map(([team,stats])=>({team,...stats,pct:100*stats.correct/stats.games}))
+   .sort((a,b)=>b.games-a.games||b.pct-a.pct||a.team.localeCompare(b.team));
 $("accuracyOutput").innerHTML=`<div class="grid" style="margin-top:12px">${periods.map(period=>{
 const m=metric(period.rows);
 return `<div class="stat"><div class="small">${period.label}</div><div class="prob">${m.pct===null?"–":m.pct.toFixed(1)+" %"}</div><div class="small">${m.w} oikein / ${m.n} ratkaistua ottelua</div></div>`;
 }).join("")}</div>
 <p class="note">Laskenta perustuu vain otteluihin, joiden lopputulos löytyi NHL:n tulosrajapinnasta. Tasapeliä ei odoteta NHL-ottelun lopputulokseksi. Tietokannasta löytyi ${predictions.length} ennustetta; ${evaluated.length} saatiin arvioitua. ${missing?missing+" ennusteen tietojen haku epäonnistui.":""}</p>
-<div class="section"><h3>Viimeisimmät ratkaistut ennusteet</h3>
+<div class="section"><h3>Joukkuekohtainen osumatarkkuus</h3>
+ <p class="small">Näyttää, kuinka usein ennuste osui otteluissa, joissa kyseinen joukkue pelasi. Molemmat joukkueet saavat samasta ottelusta saman osumatuloksen.</p>
+ <table><thead><tr><th>Joukkue</th><th>Otteluita</th><th>Oikein</th><th>Osumatarkkuus</th></tr></thead><tbody>
+ ${teamRows.map(t=>`<tr><td>${esc(t.team)}</td><td>${t.games}</td><td>${t.correct}</td><td class="${t.pct>=60?"good":t.pct<40?"bad":""}">${t.pct.toFixed(1)} %</td></tr>`).join("")}
+ </tbody></table></div>
+ <div class="section"><h3>Viimeisimmät ratkaistut ennusteet</h3>
 <table><thead><tr><th>Päivä</th><th>Ottelu</th><th>Ennuste</th><th>Tulos</th><th></th></tr></thead><tbody>
 ${evaluated.slice(0,12).map(p=>`<tr><td>${esc(p.game_date)}</td><td>${esc(p.home_team)} – ${esc(p.away_team)}</td><td>${esc(p.predicted_winner)}</td><td>${esc(p.actualWinner)}</td><td class="${p.correct?"good":"bad"}">${p.correct?"OSUI":"OHI"}</td></tr>`).join("")}
 </tbody></table></div>`;
