@@ -172,6 +172,27 @@ function setStatus(v){$("status").textContent=v}
 
 async function savePrediction(gameDate,home,away,homeProbability,awayProbability){
 const winner=homeProbability>=awayProbability?name(home):name(away);
+const homeName=name(home),awayName=name(away);
+const params=new URLSearchParams({
+select:"predicted_winner",
+game_date:"eq."+gameDate,
+home_team:"eq."+homeName,
+away_team:"eq."+awayName,
+limit:"1"
+});
+// Tarkista ensin, onko tästä ottelusta jo tallennettu ennuste.
+// Jos tarkistus epäonnistuu, älä tee uutta tallennusta sokkona.
+const check=await fetch(SUPABASE_URL+"/rest/v1/predictions?"+params.toString(),{
+headers:{"apikey":SUPABASE_PUBLISHABLE_KEY,"Authorization":"Bearer "+SUPABASE_PUBLISHABLE_KEY}
+});
+if(!check.ok){
+const detail=await check.text();
+throw Error("Aiemman ennusteen tarkistus epäonnistui ("+check.status+"): "+detail.slice(0,160));
+}
+const existing=await check.json();
+if(Array.isArray(existing)&&existing.length){
+return {winner:existing[0].predicted_winner||winner,alreadySaved:true};
+}
 const response=await fetch(SUPABASE_URL+"/rest/v1/predictions",{
 method:"POST",
 headers:{
@@ -182,8 +203,8 @@ headers:{
 },
 body:JSON.stringify({
 game_date:gameDate,
-home_team:name(home),
-away_team:name(away),
+home_team:homeName,
+away_team:awayName,
 home_win_probability:Number(homeProbability.toFixed(2)),
 away_win_probability:Number(awayProbability.toFixed(2)),
 predicted_winner:winner
@@ -193,7 +214,7 @@ if(!response.ok){
 const detail=await response.text();
 throw Error("Tietokantatallennus epäonnistui ("+response.status+"): "+detail.slice(0,180));
 }
-return winner;
+return {winner,alreadySaved:false};
 }
 
 async function fetchNHL(path){
@@ -704,7 +725,17 @@ if(!Array.isArray(predictions)||!predictions.length){
 $("accuracyStatus").textContent="Tietokannasta ei löytynyt tallennettuja ennusteita.";
 return;
 }
-const dates=[...new Set(predictions.map(p=>p.game_date).filter(Boolean))];
+// Vanha tietokanta voi sisältää saman ottelun useita rivejä.
+// Tilastoi kukin yksilöllinen ottelu vain kerran; säilytä ensimmäinen löytynyt ennusterivi.
+const uniqueByGame=new Map();
+let duplicateRows=0;
+for(const p of predictions){
+const key=[p.game_date,p.home_team,p.away_team].join("|");
+if(uniqueByGame.has(key)){duplicateRows++;continue;}
+uniqueByGame.set(key,p);
+}
+const uniquePredictions=[...uniqueByGame.values()];
+const dates=[...new Set(uniquePredictions.map(p=>p.game_date).filter(Boolean))];
 const resultsByDate={};
 for(const date of dates){
 try{resultsByDate[date]=await fetchFinalResult(date);}
@@ -713,7 +744,7 @@ catch(e){resultsByDate[date]=null;}
 const todayDate=today();
 const evaluated=[];
 let missing=0;
-for(const p of predictions){
+for(const p of uniquePredictions){
 const games=resultsByDate[p.game_date];
 if(!games){missing++;continue;}
 const home=teamCodeFromName(p.home_team);
@@ -748,7 +779,7 @@ $("accuracyOutput").innerHTML=`<div class="grid" style="margin-top:12px">${perio
 const m=metric(period.rows);
 return `<div class="stat"><div class="small">${period.label}</div><div class="prob">${m.pct===null?"–":m.pct.toFixed(1)+" %"}</div><div class="small">${m.w} oikein / ${m.n} ratkaistua ottelua</div></div>`;
 }).join("")}</div>
-<p class="note">Laskenta perustuu vain otteluihin, joiden lopputulos löytyi NHL:n tulosrajapinnasta. Tasapeliä ei odoteta NHL-ottelun lopputulokseksi. Tietokannasta löytyi ${predictions.length} ennustetta; ${evaluated.length} saatiin arvioitua. ${missing?missing+" ennusteen tietojen haku epäonnistui.":""}</p>
+<p class="note">Laskenta perustuu vain otteluihin, joiden lopputulos löytyi NHL:n tulosrajapinnasta. Tasapeliä ei odoteta NHL-ottelun lopputulokseksi. Tietokannasta löytyi ${predictions.length} riviä, joista ${duplicateRows} kaksoiskirjausta ohitettiin. Yksilöllisiä otteluita ${uniquePredictions.length}; ${evaluated.length} saatiin arvioitua. ${missing?missing+" ennusteen tietojen haku epäonnistui.":""}</p>
 ${accordion("Joukkuekohtainen osumatarkkuus",`
 <p class="small">Näyttää, kuinka usein ennuste osui otteluissa, joissa kyseinen joukkue pelasi. Molemmat joukkueet saavat samasta ottelusta saman osumatuloksen.</p>
 <table><thead><tr><th>Joukkue</th><th>Otteluita</th><th>Oikein</th><th>Osumatarkkuus</th></tr></thead><tbody>
@@ -856,8 +887,10 @@ ${teamPanel(b,sb,tb,injuries,injuryOK,targetDate,moneyB,goalies,lineups)}
 
 let saveMessage="";
 try{
-const savedWinner=await savePrediction(targetDate,a,b,p.a,p.b);
-saveMessage=" Ennuste tallennettu tietokantaan (arvioitu voittaja: "+savedWinner+").";
+const saved=await savePrediction(targetDate,a,b,p.a,p.b);
+saveMessage=saved.alreadySaved
+?" Aiempi ennuste oli jo tallennettu (voittaja-arvio: "+saved.winner+"). Uutta riviä ei lisätty."
+:" Ennuste tallennettu tietokantaan (arvioitu voittaja: "+saved.winner+").";
 }catch(saveError){
 console.error(saveError);
 saveMessage=" Ennustetta ei saatu tallennettua tietokantaan: "+saveError.message;
